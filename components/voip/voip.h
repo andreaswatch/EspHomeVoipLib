@@ -6,9 +6,9 @@
 #include <WiFiUdp.h>
 #include <Ticker.h>
 #include <driver/i2s.h>
-#include "../../../libs/arduino-libg7xx/src/g711.h"
-#include "../../../libs/arduino-libg7xx/src/g72x.h"
-#include "../../../libs/esp32_opus_arduino/src/opus.h"
+#include <g711.h>
+#include <g72x.h>
+#include <opus.h>
 
 namespace esphome {
 namespace voip {
