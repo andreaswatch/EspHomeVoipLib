@@ -1,0 +1,74 @@
+esphome:
+  name: voip-device-example
+
+esp32:
+  board: esp32dev
+
+external_components:
+  - source: github://andreaswatch/EspHomeVoipLib
+
+wifi:
+  ssid: "your_wifi_ssid"
+  password: "your_wifi_password"
+
+# Beispiel-Secrets (ersetzen Sie mit echten Werten oder !secret)
+# secrets.yaml:
+# wifi_ssid: "your_ssid"
+# wifi_password: "your_pass"
+# sip_server_ip: "192.168.1.1"
+# local_ip: "192.168.1.100"
+# sip_user: "user"
+# sip_pass: "password"
+
+# SIP-Komponente
+sip:
+  id: my_sip
+  sip_ip: "192.168.1.1"  # Ersetzen mit echtem SIP-Server
+  sip_port: 5060
+  my_ip: "192.168.1.100"  # Ersetzen mit lokaler IP
+  my_port: 5060
+  sip_user: "user"  # Ersetzen mit SIP-User
+  sip_pass: "password"  # Ersetzen mit SIP-Pass
+  codec: 1
+
+# VoIP-Komponente
+voip:
+  id: my_voip
+  sip_ip: "192.168.1.1"
+  sip_user: "user"
+  sip_pass: "password"
+  codec: 1
+  mic_gain: 2
+  amp_gain: 6
+  mic_bck_pin: 26
+  mic_ws_pin: 25
+  mic_data_pin: 33
+  mic_bits: 24
+  mic_format: 0
+  mic_buf_count: 4
+  mic_buf_len: 8
+  amp_bck_pin: 14
+  amp_ws_pin: 12
+  amp_data_pin: 27
+  amp_bits: 16
+  amp_format: 0
+  amp_buf_count: 16
+  amp_buf_len: 60
+
+# Beispiel für Buttons
+button:
+  - platform: template
+    name: "Call 123"
+    on_press:
+      - lambda: id(my_voip).dial("123", "Test Call");
+  - platform: template
+    name: "Hangup"
+    on_press:
+      - lambda: id(my_voip).hangup();
+
+logger:
+  level: DEBUG
+
+# Optional: Web-Server für Debugging
+web_server:
+  port: 80
