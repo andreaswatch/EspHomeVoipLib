@@ -2,7 +2,7 @@
 #define ESPHOME_VOIP_H
 
 #include "esphome.h"
-#include "sip.h"
+#include "../sip/sip.h"
 #include <WiFiUdp.h>
 #include <Ticker.h>
 #include <driver/i2s.h>
