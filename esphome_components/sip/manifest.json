@@ -1,0 +1,6 @@
+{
+  "name": "sip",
+  "version": "1.0.0",
+  "description": "SIP client component for ESPHome VoIP functionality",
+  "dependencies": []
+}
