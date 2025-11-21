@@ -1,9 +1,8 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import i2s_audio
 from esphome.const import CONF_ID
 
-DEPENDENCIES = ['i2s_audio']
+DEPENDENCIES = []
 AUTO_LOAD = ['sip']
 
 voip_ns = cg.esphome_ns.namespace('voip')
