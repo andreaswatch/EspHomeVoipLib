@@ -1,0 +1,9 @@
+[submodule "libs/esp32_opus_arduino"]
+	path = libs/esp32_opus_arduino
+	url = https://github.com/sh123/esp32_opus_arduino.git
+[submodule "libs/arduino-libg7xx"]
+	path = libs/arduino-libg7xx
+	url = https://github.com/pschatzmann/arduino-libg7xx.git
+[submodule "libs/ArduinoJson"]
+	path = libs/ArduinoJson
+	url = https://github.com/bblanchon/ArduinoJson.git
