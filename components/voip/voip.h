@@ -8,7 +8,6 @@
 #include <driver/i2s.h>
 #include <g711.h>
 #include <g72x.h>
-#include <opus.h>
 
 namespace esphome {
 namespace voip {
@@ -73,9 +72,9 @@ class Voip : public Component {
   int amp_buf_count_ = 16;
   int amp_buf_len_ = 60;
   // Opus
-  OpusEncoder *opus_encoder_ = nullptr;
-  OpusDecoder *opus_decoder_ = nullptr;
-  uint8_t opus_buffer_[256];
+  // OpusEncoder *opus_encoder_ = nullptr;
+  // OpusDecoder *opus_decoder_ = nullptr;
+  // uint8_t opus_buffer_[256];
   // G.72x
   struct g72x_state g72x_state_tx_;
   struct g72x_state g72x_state_rx_;

@@ -8,8 +8,8 @@ namespace voip {
 Voip::Voip() {}
 
 Voip::~Voip() {
-  if (opus_encoder_) opus_encoder_destroy(opus_encoder_);
-  if (opus_decoder_) opus_decoder_destroy(opus_decoder_);
+  // if (opus_encoder_) opus_encoder_destroy(opus_encoder_);
+  // if (opus_decoder_) opus_decoder_destroy(opus_decoder_);
 }
 
 void Voip::setup() {
@@ -33,20 +33,20 @@ void Voip::setup() {
   }
 
   // Initialize Opus
-  int opus_error;
-  opus_encoder_ = opus_encoder_create(8000, 1, OPUS_APPLICATION_VOIP, &opus_error);
-  if (opus_error != OPUS_OK) {
-    ESP_LOGE(TAG, "Opus encoder init failed: %d", opus_error);
-    return;
-  }
-  opus_encoder_ctl(opus_encoder_, OPUS_SET_BITRATE(8000));
-  opus_encoder_ctl(opus_encoder_, OPUS_SET_COMPLEXITY(0));
+  // int opus_error;
+  // opus_encoder_ = opus_encoder_create(8000, 1, OPUS_APPLICATION_VOIP, &opus_error);
+  // if (opus_error != OPUS_OK) {
+  //   ESP_LOGE(TAG, "Opus encoder init failed: %d", opus_error);
+  //   return;
+  // }
+  // opus_encoder_ctl(opus_encoder_, OPUS_SET_BITRATE(8000));
+  // opus_encoder_ctl(opus_encoder_, OPUS_SET_COMPLEXITY(0));
 
-  opus_decoder_ = opus_decoder_create(8000, 1, &opus_error);
-  if (opus_error != OPUS_OK) {
-    ESP_LOGE(TAG, "Opus decoder init failed: %d", opus_error);
-    return;
-  }
+  // opus_decoder_ = opus_decoder_create(8000, 1, &opus_error);
+  // if (opus_error != OPUS_OK) {
+  //   ESP_LOGE(TAG, "Opus decoder init failed: %d", opus_error);
+  //   return;
+  // }
   // Initialize G.72x states
   g72x_init_state(&g72x_state_tx_);
   g72x_init_state(&g72x_state_rx_);
@@ -236,28 +236,28 @@ void Voip::handle_incoming_rtp() {
     } else {
       rtp_udp_.flush();
     }
-  } else if (codec_type_ == 2) {
-    // Opus
-    int16_t decoded_samples[160];
-    packet_size_ = rtp_udp_.parsePacket();
-    if (packet_size_ > 0 && rx_stream_is_running_) {
-      packet_size_ = rtp_udp_.read(rtp_buffer_, sizeof(rtp_buffer_));
-      uint8_t *payload = rtp_buffer_ + 12;
-      rtppkg_size_ = packet_size_ - 12;
-      int decoded_size = opus_decode(opus_decoder_, payload, rtppkg_size_, decoded_samples, 160, 0);
-      if (decoded_size < 0) {
-        ESP_LOGE(TAG, "Opus decode failed: %d", decoded_size);
-        rtp_udp_.flush();
-        return;
-      }
-      for (int i = 0; i < decoded_size; i++) {
-        decoded_samples[i] *= amp_gain_;
-      }
-      size_t bytes_written;
-      write_to_amp(decoded_samples, sizeof(int16_t) * decoded_size, &bytes_written);
-    } else {
-      rtp_udp_.flush();
-    }
+  // } else if (codec_type_ == 2) {
+  //   // Opus
+  //   int16_t decoded_samples[160];
+  //   packet_size_ = rtp_udp_.parsePacket();
+  //   if (packet_size_ > 0 && rx_stream_is_running_) {
+  //     packet_size_ = rtp_udp_.read(rtp_buffer_, sizeof(rtp_buffer_));
+  //     uint8_t *payload = rtp_buffer_ + 12;
+  //     rtppkg_size_ = packet_size_ - 12;
+  //     int decoded_size = opus_decode(opus_decoder_, payload, rtppkg_size_, decoded_samples, 160, 0);
+  //     if (decoded_size < 0) {
+  //       ESP_LOGE(TAG, "Opus decode failed: %d", decoded_size);
+  //       rtp_udp_.flush();
+  //       return;
+  //     }
+  //     for (int i = 0; i < decoded_size; i++) {
+  //       decoded_samples[i] *= amp_gain_;
+  //     }
+  //     size_t bytes_written;
+  //     write_to_amp(decoded_samples, sizeof(int16_t) * decoded_size, &bytes_written);
+  //   } else {
+  //     rtp_udp_.flush();
+  //   }
   } else if (codec_type_ == 3) {
     // G.721
     int16_t buffer[160];
@@ -352,34 +352,34 @@ void Voip::tx_rtp() {
     rtp_udp_.beginPacket(ip, atoi(sip_->audioport.c_str()));
     rtp_udp_.write(packet_buffer, 12 + 160);
     rtp_udp_.endPacket();
-  } else if (codec_type_ == 2) {
-    // Opus
-    int16_t samples[160];
-    for (int i = 0; i < 160; i++) {
-      SAMPLE_T sample = 0;
-      size_t bytes_read;
-      read_from_mic(&sample, sizeof(SAMPLE_T), &bytes_read);
-      if (bytes_read > 0) {
-        samples[i] = MIC_CONVERT(sample) * mic_gain_;
-      }
-    }
-    int encoded_size = opus_encode(opus_encoder_, samples, 160, opus_buffer_, sizeof(opus_buffer_));
-    if (encoded_size < 0) {
-      ESP_LOGE(TAG, "Opus encode failed: %d", encoded_size);
-      return;
-    }
-    uint8_t *rtp_header = packet_buffer;
-    rtp_header[0] = 0x80;
-    rtp_header[1] = 120;
-    *(uint16_t *)(rtp_header + 2) = htons(sequence_number++);
-    *(uint32_t *)(rtp_header + 4) = htonl(timestamp += 160);
-    *(uint32_t *)(rtp_header + 8) = htonl(ssrc);
-    memcpy(rtp_header + 12, opus_buffer_, encoded_size);
-    IPAddress ip;
-    ip.fromString(sip_->get_sip_server_ip().c_str());
-    rtp_udp_.beginPacket(ip, atoi(sip_->audioport.c_str()));
-    rtp_udp_.write(packet_buffer, 12 + encoded_size);
-    rtp_udp_.endPacket();
+  // } else if (codec_type_ == 2) {
+  //   // Opus
+  //   int16_t samples[160];
+  //   for (int i = 0; i < 160; i++) {
+  //     SAMPLE_T sample = 0;
+  //     size_t bytes_read;
+  //     read_from_mic(&sample, sizeof(SAMPLE_T), &bytes_read);
+  //     if (bytes_read > 0) {
+  //       samples[i] = MIC_CONVERT(sample) * mic_gain_;
+  //     }
+  //   }
+  //   int encoded_size = opus_encode(opus_encoder_, samples, 160, opus_buffer_, sizeof(opus_buffer_));
+  //   if (encoded_size < 0) {
+  //     ESP_LOGE(TAG, "Opus encode failed: %d", encoded_size);
+  //     return;
+  //   }
+  //   uint8_t *rtp_header = packet_buffer;
+  //   rtp_header[0] = 0x80;
+  //   rtp_header[1] = 120;
+  //   *(uint16_t *)(rtp_header + 2) = htons(sequence_number++);
+  //   *(uint32_t *)(rtp_header + 4) = htonl(timestamp += 160);
+  //   *(uint32_t *)(rtp_header + 8) = htonl(ssrc);
+  //   memcpy(rtp_header + 12, opus_buffer_, encoded_size);
+  //   IPAddress ip;
+  //   ip.fromString(sip_->get_sip_server_ip().c_str());
+  //   rtp_udp_.beginPacket(ip, atoi(sip_->audioport.c_str()));
+  //   rtp_udp_.write(packet_buffer, 12 + encoded_size);
+  //   rtp_udp_.endPacket();
   } else if (codec_type_ == 3) {
     // G.721
     uint8_t temp[80];

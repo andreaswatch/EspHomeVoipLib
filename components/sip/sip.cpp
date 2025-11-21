@@ -189,10 +189,10 @@ void Sip::invite(const char *p) {
   } else if (codec_ == 1) {
     add_sip_line("m=audio 1234 RTP/AVP 8");
     add_sip_line("a=rtpmap:8 PCMA/8000");
-  } else {
-    add_sip_line("m=audio 1234 RTP/AVP 120");
-    add_sip_line("a=rtpmap:120 opus/8000/1");
-    add_sip_line("a=fmtp:120 maxplaybackrate=8000; sprop-maxcapturerate=8000; maxaveragebitrate=16000");
+  // } else {
+  //   add_sip_line("m=audio 1234 RTP/AVP 120");
+  //   add_sip_line("a=rtpmap:120 opus/8000/1");
+  //   add_sip_line("a=fmtp:120 maxplaybackrate=8000; sprop-maxcapturerate=8000; maxaveragebitrate=16000");
   }
   ca_read_[0] = 0;
   ESP_LOGD(TAG, "Sending INVITE");
@@ -341,16 +341,16 @@ void Sip::handle_udp_packet() {
       } else {
         ESP_LOGD(TAG, "RTP/AVP 8 found");
       }
-    } else {
-      sdpportptr = strstr(p, " RTP/AVP 120");
-      if (sdpportptr == NULL) {
-        ESP_LOGD(TAG, "RTP/AVP 120 not found");
-        audioport = "";
-        return;
-      } else {
-        ESP_LOGD(TAG, "RTP/AVP 120 found");
-      }
-    }
+    // } else {
+    //   sdpportptr = strstr(p, " RTP/AVP 120");
+    //   if (sdpportptr == NULL) {
+    //     ESP_LOGD(TAG, "RTP/AVP 120 not found");
+    //     audioport = "";
+    //     return;
+    //   } else {
+    //     ESP_LOGD(TAG, "RTP/AVP 120 found");
+    //   }
+    // }
     sdpportptr--;
     int i = 0;
     while (*sdpportptr != ' ' || i > 8) {
