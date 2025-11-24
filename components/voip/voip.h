@@ -3,9 +3,10 @@
 
 #include "esphome.h"
 #include <driver/i2s.h>
-#include "esphome/core/network.h"
+#include "esphome/components/socket/udp_socket.h"
 #include "esphome/core/scheduler.h"
 #include "esphome/components/i2s_audio/i2s_audio.h"
+#include "esphome/components/network/util.h"
 #include "g711.h"
 
 namespace esphome {
