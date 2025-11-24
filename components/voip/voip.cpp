@@ -2,9 +2,6 @@
 #include <MD5Builder.h>
 #include <cstring>
 #include <cstdarg>
-#include <MD5Builder.h>
-#include <cstring>
-#include <cstdarg>
 #include <Arduino.h>
 
 namespace esphome {
@@ -34,7 +31,7 @@ void Sip::dump_config() {
 }
 
 void Sip::init(const std::string &sip_ip, int sip_port, const std::string &my_ip, int my_port, const std::string &sip_user, const std::string &sip_pass) {
-  udp_.begin(sip_port);
+  udp_.bind(sip_port);
   memset(ca_read_, 0, sizeof(ca_read_));
   memset(p_buf_, 0, l_buf_);
   p_sip_ip_ = sip_ip;
@@ -277,11 +274,10 @@ bool Sip::parse_return_params(const char *p) {
 void Sip::handle_udp_packet() {
   char *p;
   char ca_sip_in[2048];
-  int packet_size = udp_.parsePacket();
-  if (packet_size > 0) {
-    ESP_LOGD(TAG, "Received SIP packet from %s:%d size %d", udp_.remoteIP().toString().c_str(), udp_.remotePort(), packet_size);
-    ca_sip_in[0] = 0;
+  int packet_size = 0;
+  if (udp_.has_packet()) {
     packet_size = udp_.read(ca_sip_in, sizeof(ca_sip_in));
+    ESP_LOGD(TAG, "Received SIP packet from %s:%d size %d", udp_.get_remote_ip().str().c_str(), udp_.get_remote_port(), packet_size);
     if (packet_size > 0) {
       ca_sip_in[packet_size] = 0;
       ESP_LOGD(TAG, "Response status: %s", strstr(ca_sip_in, "SIP/2.0") ? strstr(ca_sip_in, "SIP/2.0") : "No SIP/2.0");
@@ -390,9 +386,7 @@ void Sip::handle_udp_packet() {
 
 int Sip::send_udp() {
   ESP_LOGD(TAG, "Sending SIP packet to %s:%d", p_sip_ip_.c_str(), i_sip_port_);
-  udp_.beginPacket(p_sip_ip_.c_str(), i_sip_port_);
-  udp_.write((uint8_t *)p_buf_, strlen(p_buf_));
-  udp_.endPacket();
+  udp_.sendto((uint8_t *)p_buf_, strlen(p_buf_), network::IPAddress(p_sip_ip_.c_str()), i_sip_port_);
   return 0;
 }
 
@@ -606,12 +600,8 @@ Voip::~Voip() {
 }
 
 void Voip::setup() {
-  my_ip_ = WiFi.localIP().toString().c_str();
-  int conn_ok = rtp_udp_.begin(1234);
-  if (conn_ok == 0) {
-    ESP_LOGE(TAG, "rtp_udp (port:1234) could not get socket");
-    return;
-  }
+  my_ip_ = network::get_ip_address().str();
+  rtp_udp_.bind(1234);
   ESP_LOGI(TAG, "rtp_udp listen on (port:1234)");
   sip_ = new Sip();
   sip_->init(sip_ip_, sip_port_, my_ip_, sip_port_, sip_user_, sip_pass_);
@@ -627,7 +617,7 @@ void Voip::setup() {
 }
 
 void Voip::loop() {
-  if (WiFi.status() == WL_CONNECTED) {
+  if (network::is_connected()) {
     handle_incoming_rtp();
     handle_outgoing_rtp();
     sip_->loop();
@@ -781,8 +771,7 @@ void Voip::handle_incoming_rtp() {
   if (codec_type_ == 0) {
     // PCMU
     int16_t buffer[500];
-    packet_size_ = rtp_udp_.parsePacket();
-    if (packet_size_ > 0 && rx_stream_is_running_) {
+    if (rtp_udp_.has_packet() && rx_stream_is_running_) {
       packet_size_ = rtp_udp_.read(rtp_buffer_, sizeof(rtp_buffer_));
       uint8_t *payload = rtp_buffer_ + 12; // Skip RTP header
       rtppkg_size_ = packet_size_ - 12;
@@ -792,13 +781,12 @@ void Voip::handle_incoming_rtp() {
       size_t bytes_written;
       write_to_amp(buffer, sizeof(int16_t) * rtppkg_size_, &bytes_written);
     } else {
-      rtp_udp_.flush();
+      // No flush in ESPHome UdpSocket, perhaps just ignore
     }
   } else if (codec_type_ == 1) {
     // PCMA
     int16_t buffer[500];
-    packet_size_ = rtp_udp_.parsePacket();
-    if (packet_size_ > 0 && rx_stream_is_running_) {
+    if (rtp_udp_.has_packet() && rx_stream_is_running_) {
       packet_size_ = rtp_udp_.read(rtp_buffer_, sizeof(rtp_buffer_));
       uint8_t *payload = rtp_buffer_ + 12;
       rtppkg_size_ = packet_size_ - 12;
@@ -808,10 +796,10 @@ void Voip::handle_incoming_rtp() {
       size_t bytes_written;
       write_to_amp(buffer, sizeof(int16_t) * rtppkg_size_, &bytes_written);
     } else {
-      rtp_udp_.flush();
+      // No flush
     }
   } else {
-    rtp_udp_.flush();
+    // No flush
   }
 }
 
@@ -819,19 +807,15 @@ void Voip::handle_outgoing_rtp() {
   if (!sip_->audioport.empty() && !tx_stream_is_running_) {
     tx_stream_is_running_ = true;
     ESP_LOGI(TAG, "Starting RTP stream");
-    tx_stream_ticker_.attach_ms(20, std::bind(&Voip::tx_rtp_static, this));
+    tx_interval_ = scheduler::set_interval(this, [this]() { tx_rtp(); }, 20_ms);
   } else if (sip_->audioport.empty() && tx_stream_is_running_) {
     tx_stream_is_running_ = false;
     rx_stream_is_running_ = false;
     rtppkg_size_ = -1;
     ESP_LOGI(TAG, "RTP stream stopped");
-    tx_stream_ticker_.detach();
+    scheduler::cancel_interval(tx_interval_);
     stop_i2s();
   }
-}
-
-void Voip::tx_rtp_static(Voip *instance) {
-  instance->tx_rtp();
 }
 
 void Voip::tx_rtp() {
@@ -858,11 +842,8 @@ void Voip::tx_rtp() {
     *(uint32_t *)(rtp_header + 4) = htonl(timestamp += 160);
     *(uint32_t *)(rtp_header + 8) = htonl(ssrc);
     memcpy(rtp_header + 12, temp, 160);
-    IPAddress ip;
-    ip.fromString(sip_->get_sip_server_ip().c_str());
-    rtp_udp_.beginPacket(ip, atoi(sip_->audioport.c_str()));
-    rtp_udp_.write(packet_buffer, 12 + 160);
-    rtp_udp_.endPacket();
+    network::IPAddress ip(sip_->get_sip_server_ip().c_str());
+    rtp_udp_.sendto(packet_buffer, 12 + 160, ip, atoi(sip_->audioport.c_str()));
   } else if (codec_type_ == 1) {
     // PCMA
     uint8_t temp[160];
@@ -881,11 +862,8 @@ void Voip::tx_rtp() {
     *(uint32_t *)(rtp_header + 4) = htonl(timestamp += 160);
     *(uint32_t *)(rtp_header + 8) = htonl(ssrc);
     memcpy(rtp_header + 12, temp, 160);
-    IPAddress ip;
-    ip.fromString(sip_->get_sip_server_ip().c_str());
-    rtp_udp_.beginPacket(ip, atoi(sip_->audioport.c_str()));
-    rtp_udp_.write(packet_buffer, 12 + 160);
-    rtp_udp_.endPacket();
+    network::IPAddress ip(sip_->get_sip_server_ip().c_str());
+    rtp_udp_.sendto(packet_buffer, 12 + 160, ip, atoi(sip_->audioport.c_str()));
   }
 }
 

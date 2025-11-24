@@ -1,0 +1,75 @@
+esphome:
+  name: voip-test-esp32p4
+
+esp32:
+  board: esp32-p4-evboard
+  variant: ESP32P4
+  framework:
+    type: esp-idf
+
+# ESP32-C6 Co-Prozessor (falls benötigt für das Dev Kit)
+esp32_hosted:
+  variant: ESP32C6
+  reset_pin: GPIO54
+  cmd_pin: GPIO19
+  clk_pin: GPIO18
+  d0_pin: GPIO14
+  d1_pin: GPIO15
+  d2_pin: GPIO16
+  d3_pin: GPIO17
+  active_high: true
+
+external_components:
+  - source: components
+    components: [voip]
+
+wifi:
+  ssid: "YourWiFiSSID"
+  password: "YourWiFiPassword"
+
+# VoIP-Komponente
+voip:
+  id: my_voip
+  sip_ip: "192.168.1.1"  # Ersetzen Sie durch Ihre SIP-Server-IP
+  sip_user: "user"       # Ersetzen Sie durch Ihren SIP-Benutzer
+  sip_pass: "password"   # Ersetzen Sie durch Ihr SIP-Passwort
+  codec: 0               # 0=PCMU, 1=PCMA, 2=G.721
+  mic_gain: 2
+  amp_gain: 6
+  # I2S-Konfiguration für Mikrofon (angepasst an ESP32-P4 Dev Kit)
+  mic_bck_pin: 5         # GPIO5 (i2s_bclk_pin für i2s_in)
+  mic_ws_pin: 4          # GPIO4 (i2s_lrclk_pin für i2s_in)
+  mic_data_pin: 6        # GPIO6 (i2s_din_pin)
+  mic_bits: 24
+  mic_format: 0
+  mic_buf_count: 4
+  mic_buf_len: 8
+  # I2S-Konfiguration für Verstärker (angepasst an ESP32-P4 Dev Kit)
+  amp_bck_pin: 9         # GPIO9 (i2s_bclk_pin für i2s_out)
+  amp_ws_pin: 8          # GPIO8 (i2s_lrclk_pin für i2s_out)
+  amp_data_pin: 10       # GPIO10 (i2s_dout_pin)
+  amp_bits: 16
+  amp_format: 0
+  amp_buf_count: 16
+  amp_buf_len: 60
+
+# Beispiel-Buttons zum Testen
+button:
+  - platform: template
+    name: "Call 123"
+    on_press:
+      - lambda: id(my_voip).dial("123", "Test Call");
+
+  - platform: template
+    name: "Hangup"
+    on_press:
+      - lambda: id(my_voip).hangup();
+
+# Logger für Debugging
+logger:
+  level: DEBUG
+
+# Optional: OTA für Updates
+ota:
+  - platform: esphome  
+    password: "ota_password"

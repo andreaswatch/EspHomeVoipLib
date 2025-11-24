@@ -2,8 +2,6 @@
 #define ESPHOME_VOIP_H
 
 #include "esphome.h"
-#include <WiFiUdp.h>
-#include <Ticker.h>
 #include <driver/i2s.h>
 #include "g711.h"
 
@@ -26,7 +24,7 @@ class Sip : public Component {
   std::string audioport;
 
  protected:
-  WiFiUDP udp_;
+  network::UdpSocket udp_;
   char *p_buf_;
   size_t l_buf_;
   char ca_read_[256];
@@ -98,8 +96,8 @@ class Voip : public Component {
 
  protected:
   Sip *sip_;
-  WiFiUDP rtp_udp_;
-  Ticker tx_stream_ticker_;
+  network::UdpSocket rtp_udp_;
+  scheduler::IntervalHandle tx_interval_;
   bool tx_stream_is_running_ = false;
   bool rx_stream_is_running_ = false;
   int rtppkg_size_ = -1;
@@ -135,7 +133,6 @@ class Voip : public Component {
 
   void handle_incoming_rtp();
   void handle_outgoing_rtp();
-  static void tx_rtp_static(Voip *instance);
   void tx_rtp();
   int init_i2s_mic();
   int init_i2s_amp();
