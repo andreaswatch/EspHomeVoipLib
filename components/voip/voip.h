@@ -118,12 +118,8 @@ class Voip : public Component {
   std::string sip_ip_;
   std::string sip_user_;
   std::string sip_pass_;
-  I2SAudioMicrophone *microphone_;
-  I2SAudioSpeaker *speaker_;
-
-  void handle_incoming_rtp();
-  void handle_outgoing_rtp();
-  void tx_rtp();
+  std::vector<uint8_t> mic_buffer_;
+  void mic_data_callback(const std::vector<uint8_t> &data);
 };
 
 }  // namespace voip

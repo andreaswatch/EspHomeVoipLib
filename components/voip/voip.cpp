@@ -664,6 +664,7 @@ void Voip::setup() {
     ESP_LOGE(TAG, "Speaker not found");
     return;
   }
+  microphone_->add_data_callback([this](const std::vector<uint8_t> &data) { this->mic_data_callback(data); });
 }
 
 void Voip::loop() {
@@ -742,12 +743,14 @@ void Voip::handle_outgoing_rtp() {
   if (!sip_->audioport.empty() && !tx_stream_is_running_) {
     tx_stream_is_running_ = true;
     ESP_LOGI(TAG, "Starting RTP stream");
+    microphone_->start();
     App.scheduler.set_interval(this, "rtp_tx", 20, [this]() { tx_rtp(); });
   } else if (sip_->audioport.empty() && tx_stream_is_running_) {
     tx_stream_is_running_ = false;
     rx_stream_is_running_ = false;
     rtppkg_size_ = -1;
     ESP_LOGI(TAG, "RTP stream stopped");
+    microphone_->stop();
     App.scheduler.cancel_interval(this, "rtp_tx");
   }
 }
@@ -761,12 +764,14 @@ void Voip::tx_rtp() {
   if (codec_type_ == 0) {
     // PCMU
     uint8_t temp[160];
-    for (int i = 0; i < 160; i++) {
-      SAMPLE_T sample = 0;
-      uint8_t sample_buf[sizeof(SAMPLE_T)];
-      microphone_->read(sample_buf, sizeof(SAMPLE_T), 0);
-      memcpy(&sample, sample_buf, sizeof(SAMPLE_T));
-      temp[i] = linear2ulaw(MIC_CONVERT(sample) * mic_gain_);
+    if (mic_buffer_.size() >= 640) {
+      for (int i = 0; i < 160; i++) {
+        SAMPLE_T sample = *(SAMPLE_T *)&mic_buffer_[i * 4];
+        temp[i] = linear2ulaw(MIC_CONVERT(sample) * mic_gain_);
+      }
+      mic_buffer_.erase(mic_buffer_.begin(), mic_buffer_.begin() + 640);
+    } else {
+      return; // not enough data
     }
     uint8_t *rtp_header = packet_buffer;
     rtp_header[0] = 0x80;
@@ -783,12 +788,14 @@ void Voip::tx_rtp() {
   } else if (codec_type_ == 1) {
     // PCMA
     uint8_t temp[160];
-    for (int i = 0; i < 160; i++) {
-      SAMPLE_T sample = 0;
-      uint8_t sample_buf[sizeof(SAMPLE_T)];
-      microphone_->read(sample_buf, sizeof(SAMPLE_T), 0);
-      memcpy(&sample, sample_buf, sizeof(SAMPLE_T));
-      temp[i] = linear2alaw(MIC_CONVERT(sample) * mic_gain_);
+    if (mic_buffer_.size() >= 640) {
+      for (int i = 0; i < 160; i++) {
+        SAMPLE_T sample = *(SAMPLE_T *)&mic_buffer_[i * 4];
+        temp[i] = linear2alaw(MIC_CONVERT(sample) * mic_gain_);
+      }
+      mic_buffer_.erase(mic_buffer_.begin(), mic_buffer_.begin() + 640);
+    } else {
+      return; // not enough data
     }
     uint8_t *rtp_header = packet_buffer;
     rtp_header[0] = 0x80;
@@ -803,6 +810,10 @@ void Voip::tx_rtp() {
     inet_pton(AF_INET, sip_->get_sip_server_ip().c_str(), &remote.sin_addr);
     this->rtp_udp_->sendto(packet_buffer, 12 + 160, 0, (struct sockaddr *)&remote, sizeof(remote));
   }
+}
+
+void Voip::mic_data_callback(const std::vector<uint8_t> &data) {
+  mic_buffer_.insert(mic_buffer_.end(), data.begin(), data.end());
 }
 
 }  // namespace voip
