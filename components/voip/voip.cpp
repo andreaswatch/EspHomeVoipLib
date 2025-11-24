@@ -748,7 +748,7 @@ void Voip::handle_outgoing_rtp() {
     rx_stream_is_running_ = false;
     rtppkg_size_ = -1;
     ESP_LOGI(TAG, "RTP stream stopped");
-    App.scheduler.cancel_interval("rtp_tx");
+    App.scheduler.cancel_interval(this, "rtp_tx");
   }
 }
 
@@ -763,13 +763,10 @@ void Voip::tx_rtp() {
     uint8_t temp[160];
     for (int i = 0; i < 160; i++) {
       SAMPLE_T sample = 0;
-      size_t bytes_read;
       uint8_t sample_buf[sizeof(SAMPLE_T)];
-      microphone_->read_(sample_buf, sizeof(SAMPLE_T), &bytes_read);
-      if (bytes_read > 0) {
-        memcpy(&sample, sample_buf, sizeof(SAMPLE_T));
-        temp[i] = linear2ulaw(MIC_CONVERT(sample) * mic_gain_);
-      }
+      microphone_->read(sample_buf, sizeof(SAMPLE_T), 0);
+      memcpy(&sample, sample_buf, sizeof(SAMPLE_T));
+      temp[i] = linear2ulaw(MIC_CONVERT(sample) * mic_gain_);
     }
     uint8_t *rtp_header = packet_buffer;
     rtp_header[0] = 0x80;
@@ -788,13 +785,10 @@ void Voip::tx_rtp() {
     uint8_t temp[160];
     for (int i = 0; i < 160; i++) {
       SAMPLE_T sample = 0;
-      size_t bytes_read;
       uint8_t sample_buf[sizeof(SAMPLE_T)];
-      microphone_->read_(sample_buf, sizeof(SAMPLE_T), &bytes_read);
-      if (bytes_read > 0) {
-        memcpy(&sample, sample_buf, sizeof(SAMPLE_T));
-        temp[i] = linear2alaw(MIC_CONVERT(sample) * mic_gain_);
-      }
+      microphone_->read(sample_buf, sizeof(SAMPLE_T), 0);
+      memcpy(&sample, sample_buf, sizeof(SAMPLE_T));
+      temp[i] = linear2alaw(MIC_CONVERT(sample) * mic_gain_);
     }
     uint8_t *rtp_header = packet_buffer;
     rtp_header[0] = 0x80;
