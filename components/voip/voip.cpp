@@ -36,7 +36,7 @@ void Sip::dump_config() {
   ESP_LOGCONFIG(TAG, "  User: %s", p_sip_user_.c_str());
 }
 
-void Sip::init(const std::string &sip_ip, int sip_port, const std::string &my_ip, int my_port, const std::string &sip_user, const std::string &sip_pass) {
+void Sip::init(const ::std::string &sip_ip, int sip_port, const ::std::string &my_ip, int my_port, const ::std::string &sip_user, const ::std::string &sip_pass) {
   this->udp_ = socket::socket(AF_INET, SOCK_DGRAM, 0);
   if (this->udp_ == nullptr) {
     ESP_LOGE(TAG, "Failed to create SIP UDP socket");
@@ -63,7 +63,7 @@ void Sip::init(const std::string &sip_ip, int sip_port, const std::string &my_ip
   i_ring_time_ = 0;
 }
 
-bool Sip::dial(const std::string &dial_nr, const std::string &dial_desc) {
+bool Sip::dial(const ::std::string &dial_nr, const ::std::string &dial_desc) {
   if (i_ring_time_)
     return false;
 
@@ -107,9 +107,9 @@ void Sip::bye(int cseq) {
   send_udp();
 }
 
-void Sip::ack(const char *p) {
-  std::string ca;
-  bool b = parse_parameter(ca, "To: <", p, '>');
+void Sip::ack(const char *p_in) {
+  ::std::string ca;
+  bool b = parse_parameter(ca, "To: <", p_in, '>');
   if (!b)
     return;
 
@@ -159,7 +159,7 @@ void Sip::invite(const char *p) {
     }
   } else {
     cseq = 2;
-    std::string realm, nonce;
+    ::std::string realm, nonce;
     if (parse_parameter(realm, " realm=\"", p) &&
         parse_parameter(nonce, " nonce=\"", p)) {
       // using output buffer to build the md5 hashes
@@ -236,7 +236,7 @@ void Sip::add_sip_line(const char *const_format, ...) {
   }
 }
 
-bool Sip::parse_parameter(std::string &dest, const char *name, const char *line, char cq) {
+bool Sip::parse_parameter(::std::string &dest, const char *name, const char *line, char cq) {
   const char *qp;
   const char *r;
   if ((r = strstr(line, name)) != NULL) {
@@ -664,7 +664,7 @@ void Voip::setup() {
     ESP_LOGE(TAG, "Speaker not found");
     return;
   }
-  microphone_->add_data_callback([this](const std::vector<uint8_t> &data) { this->mic_data_callback(data); });
+  microphone_->add_data_callback([this](const ::std::vector<uint8_t> &data) { this->mic_data_callback(data); });
 }
 
 void Voip::loop() {
@@ -682,13 +682,13 @@ void Voip::dump_config() {
   ESP_LOGCONFIG(TAG, "  Codec: %d", codec_type_);
 }
 
-void Voip::init(const std::string &sip_ip, const std::string &sip_user, const std::string &sip_pass) {
+void Voip::init(const ::std::string &sip_ip, const ::std::string &sip_user, const ::std::string &sip_pass) {
   sip_ip_ = sip_ip;
   sip_user_ = sip_user;
   sip_pass_ = sip_pass;
 }
 
-void Voip::dial(const std::string &number, const std::string &id) {
+void Voip::dial(const ::std::string &number, const ::std::string &id) {
   ESP_LOGI(TAG, "Dialing %s", number.c_str());
   rx_stream_is_running_ = true;
   sip_->dial(number, id);
@@ -812,7 +812,7 @@ void Voip::tx_rtp() {
   }
 }
 
-void Voip::mic_data_callback(const std::vector<uint8_t> &data) {
+void Voip::mic_data_callback(const ::std::vector<uint8_t> &data) {
   mic_buffer_.insert(mic_buffer_.end(), data.begin(), data.end());
 }
 

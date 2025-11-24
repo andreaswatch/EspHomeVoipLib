@@ -23,6 +23,8 @@ external_components:
   - source: components
     components: [voip]
 
+socket:
+
 wifi:
   ssid: "YourWiFiSSID"
   password: "YourWiFiPassword"
@@ -86,8 +88,3 @@ button:
 # Logger für Debugging
 logger:
   level: DEBUG
-
-# Optional: OTA für Updates
-ota:
-  - platform: esphome  
-    password: "ota_password"
