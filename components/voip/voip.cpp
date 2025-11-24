@@ -1,7 +1,9 @@
 #include "voip.h"
 #include <cstring>
 #include <cstdarg>
-#include <Arduino.h>
+#include "esphome/core/helpers.h"
+#include "esphome/core/hal.h"
+#include <esp_system.h>
 #include "mbedtls/md5.h"
 
 namespace esphome {
@@ -395,7 +397,7 @@ uint32_t Sip::random() {
 }
 
 uint32_t Sip::millis() {
-  return (uint32_t)::millis() + 1;
+  return (uint32_t)esphome::millis() + 1;
 }
 
 void Sip::make_md5_digest(char *p_out_hex33, char *p_in) {
