@@ -98,8 +98,11 @@ class Voip : public Component {
   void set_codec(int codec);
   void set_mic_gain(int gain) { mic_gain_ = gain; }
   void set_amp_gain(int gain) { amp_gain_ = gain; }
-  void set_mic(i2s_audio::I2SAudioMicrophone *mic) { microphone_ = mic; }
-  void set_speaker(i2s_audio::I2SAudioSpeaker *speaker) { speaker_ = speaker; }
+  void set_mic(I2SAudioMicrophone *mic) { microphone_ = mic; }
+  void set_speaker(I2SAudioSpeaker *speaker) { speaker_ = speaker; }
+
+  I2SAudioMicrophone *microphone_ = nullptr;
+  I2SAudioSpeaker *speaker_ = nullptr;
 
  protected:
   Sip *sip_;
@@ -120,7 +123,9 @@ class Voip : public Component {
   std::string sip_pass_;
   std::vector<uint8_t> mic_buffer_;
   void mic_data_callback(const std::vector<uint8_t> &data);
-};
+  void handle_incoming_rtp();
+  void handle_outgoing_rtp();
+  void tx_rtp();
 
 }  // namespace voip
 }  // namespace esphome
