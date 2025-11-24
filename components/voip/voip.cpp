@@ -655,8 +655,7 @@ void Voip::setup() {
   sip_ = new Sip();
   sip_->init(sip_ip_, sip_port_, "192.168.1.100", sip_port_, sip_user_, sip_pass_);
 
-  microphone_ = App.get_component<I2SAudioMicrophone>(mic_id_);
-  speaker_ = App.get_component<I2SAudioSpeaker>(speaker_id_);
+  // microphone_ and speaker_ are set by set_mic and set_speaker
   if (microphone_ == nullptr) {
     ESP_LOGE(TAG, "Microphone not found");
     return;
@@ -743,13 +742,13 @@ void Voip::handle_outgoing_rtp() {
   if (!sip_->audioport.empty() && !tx_stream_is_running_) {
     tx_stream_is_running_ = true;
     ESP_LOGI(TAG, "Starting RTP stream");
-    tx_interval_ = App.scheduler.set_interval(this, [this]() { tx_rtp(); }, 20);
+    App.scheduler.set_interval(this, "rtp_tx", 20, [this]() { tx_rtp(); });
   } else if (sip_->audioport.empty() && tx_stream_is_running_) {
     tx_stream_is_running_ = false;
     rx_stream_is_running_ = false;
     rtppkg_size_ = -1;
     ESP_LOGI(TAG, "RTP stream stopped");
-    App.scheduler.cancel_interval(tx_interval_);
+    App.scheduler.cancel_interval("rtp_tx");
   }
 }
 
@@ -765,8 +764,10 @@ void Voip::tx_rtp() {
     for (int i = 0; i < 160; i++) {
       SAMPLE_T sample = 0;
       size_t bytes_read;
-      microphone_->read_(&sample, sizeof(SAMPLE_T), &bytes_read);
+      uint8_t sample_buf[sizeof(SAMPLE_T)];
+      microphone_->read_(sample_buf, sizeof(SAMPLE_T), &bytes_read);
       if (bytes_read > 0) {
+        memcpy(&sample, sample_buf, sizeof(SAMPLE_T));
         temp[i] = linear2ulaw(MIC_CONVERT(sample) * mic_gain_);
       }
     }
@@ -788,8 +789,10 @@ void Voip::tx_rtp() {
     for (int i = 0; i < 160; i++) {
       SAMPLE_T sample = 0;
       size_t bytes_read;
-      microphone_->read_(&sample, sizeof(SAMPLE_T), &bytes_read);
+      uint8_t sample_buf[sizeof(SAMPLE_T)];
+      microphone_->read_(sample_buf, sizeof(SAMPLE_T), &bytes_read);
       if (bytes_read > 0) {
+        memcpy(&sample, sample_buf, sizeof(SAMPLE_T));
         temp[i] = linear2alaw(MIC_CONVERT(sample) * mic_gain_);
       }
     }
