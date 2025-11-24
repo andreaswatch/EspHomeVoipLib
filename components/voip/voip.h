@@ -94,8 +94,8 @@ class Voip : public Component {
   void set_codec(int codec);
   void set_mic_gain(int gain) { mic_gain_ = gain; }
   void set_amp_gain(int gain) { amp_gain_ = gain; }
-  void set_mic_id(const std::string &id) { mic_id_ = id; }
-  void set_speaker_id(const std::string &id) { speaker_id_ = id; }
+  void set_mic(i2s_audio::I2SAudioMicrophone *mic) { microphone_ = mic; }
+  void set_speaker(i2s_audio::I2SAudioSpeaker *speaker) { speaker_ = speaker; }
 
  protected:
   Sip *sip_;
