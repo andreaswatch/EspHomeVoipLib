@@ -35,6 +35,47 @@ Sip::Sip() : p_buf_(nullptr), l_buf_(2048), i_last_cseq_(0), codec_(0) {
   audioport = "";
 }
 
+void Sip::init(const std::string &sip_ip, int sip_port, const std::string &my_ip, int my_port, const std::string &sip_user, const std::string &sip_pass) {
+  p_sip_ip_ = sip_ip;
+  i_sip_port_ = sip_port;
+  p_my_ip_ = my_ip;
+  i_my_port_ = my_port;
+  p_sip_user_ = sip_user;
+  p_sip_pass_ = sip_pass;
+  i_auth_cnt_ = 0;
+  i_ring_time_ = 0;
+  i_max_time_ = 0;
+  i_dial_retries_ = 0;
+  i_last_cseq_ = 0;
+  codec_ = 0;
+  // create SIP socket
+  this->udp_ = socket::socket(AF_INET, SOCK_DGRAM, 0);
+  if (this->udp_ != nullptr) {
+    this->udp_->setblocking(false);
+    struct sockaddr_in local = {};
+    local.sin_family = AF_INET;
+    local.sin_port = htons(this->i_my_port_);
+    local.sin_addr.s_addr = INADDR_ANY;
+    this->udp_->bind((struct sockaddr *)&local, sizeof(local));
+  } else {
+    ESP_LOGW(TAG, "Sip::init: Failed to create UDP socket for SIP");
+  }
+}
+
+void Sip::setup() {
+  // SIP-specific setup can be done here if needed
+}
+
+void Sip::loop() {
+  if (this->udp_) this->handle_udp_packet();
+}
+
+void Sip::dump_config() {
+  ESP_LOGCONFIG(TAG, "Sip component:");
+  ESP_LOGCONFIG(TAG, "  SIP IP: %s", p_sip_ip_.c_str());
+  ESP_LOGCONFIG(TAG, "  SIP Port: %d", i_sip_port_);
+}
+
 Sip::~Sip() {
   if (p_buf_) {
     delete[] p_buf_;

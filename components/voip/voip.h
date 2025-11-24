@@ -107,7 +107,6 @@ class Voip : public Component {
   void set_mic(i2s_audio::I2SAudioMicrophone *mic) { microphone_ = mic; }
   void set_speaker(i2s_audio::I2SAudioSpeaker *speaker) { speaker_ = speaker; }
   void set_ready_sensor(esphome::binary_sensor::BinarySensor *sensor) { ready_sensor_ = sensor; }
-  void set_ready_sensor(esphome::binary_sensor::BinarySensor *sensor) { ready_sensor_ = sensor; }
   void set_default_dial_number(const std::string &num) { default_dial_number_ = num; }
   const std::string &get_default_dial_number() const { return default_dial_number_; }
   void start() { if (!default_dial_number_.empty()) dial(default_dial_number_, "Start"); }
