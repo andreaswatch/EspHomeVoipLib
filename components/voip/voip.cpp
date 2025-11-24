@@ -42,6 +42,7 @@ void Sip::init(const std::string &sip_ip, int sip_port, const std::string &my_ip
     ESP_LOGE(TAG, "Failed to create SIP UDP socket");
     return;
   }
+  this->udp_->setblocking(false);
   struct sockaddr_in addr = {};
   addr.sin_family = AF_INET;
   addr.sin_port = htons(sip_port);
@@ -295,7 +296,7 @@ void Sip::handle_udp_packet() {
   int packet_size = 0;
   struct sockaddr_in remote;
   socklen_t addrlen = sizeof(remote);
-  packet_size = this->udp_->recvfrom(ca_sip_in, sizeof(ca_sip_in), MSG_DONTWAIT, (struct sockaddr *)&remote, &addrlen);
+  packet_size = this->udp_->recvfrom(ca_sip_in, sizeof(ca_sip_in), (struct sockaddr *)&remote, &addrlen);
   if (packet_size > 0) {
     char ip_str[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &remote.sin_addr, ip_str, sizeof(ip_str));
@@ -641,6 +642,7 @@ void Voip::setup() {
     ESP_LOGE(TAG, "Failed to create RTP UDP socket");
     return;
   }
+  this->rtp_udp_->setblocking(false);
   struct sockaddr_in rtp_addr = {};
   rtp_addr.sin_family = AF_INET;
   rtp_addr.sin_port = htons(1234);
@@ -653,8 +655,8 @@ void Voip::setup() {
   sip_ = new Sip();
   sip_->init(sip_ip_, sip_port_, "192.168.1.100", sip_port_, sip_user_, sip_pass_);
 
-  microphone_ = esphome::App::get_component<I2SAudioMicrophone>(mic_id_);
-  speaker_ = esphome::App::get_component<I2SAudioSpeaker>(speaker_id_);
+  microphone_ = App.get_component<I2SAudioMicrophone>(mic_id_);
+  speaker_ = App.get_component<I2SAudioSpeaker>(speaker_id_);
   if (microphone_ == nullptr) {
     ESP_LOGE(TAG, "Microphone not found");
     return;
@@ -705,146 +707,34 @@ void Voip::set_codec(int codec) {
   sip_->set_codec(codec);
 }
 
-void Voip::set_mic_i2s_config(int bck_pin, int ws_pin, int data_pin, int bits, int format, int buf_count, int buf_len) {
-  mic_bck_pin_ = bck_pin;
-  mic_ws_pin_ = ws_pin;
-  mic_data_pin_ = data_pin;
-  mic_bits_ = bits;
-  mic_format_ = format;
-  mic_buf_count_ = buf_count;
-  mic_buf_len_ = buf_len;
-}
-
-void Voip::set_amp_i2s_config(int bck_pin, int ws_pin, int data_pin, int bits, int format, int buf_count, int buf_len) {
-  amp_bck_pin_ = bck_pin;
-  amp_ws_pin_ = ws_pin;
-  amp_data_pin_ = data_pin;
-  amp_bits_ = bits;
-  amp_format_ = format;
-  amp_buf_count_ = buf_count;
-  amp_buf_len_ = buf_len;
-}
-
-int Voip::init_i2s_mic() {
-  esp_err_t err;
-  i2s_bits_per_sample_t bits_per_sample;
-  switch (mic_bits_) {
-    case 16: bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT; break;
-    case 24: bits_per_sample = I2S_BITS_PER_SAMPLE_24BIT; break;
-    case 32: bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT; break;
-    default: bits_per_sample = I2S_BITS_PER_SAMPLE_24BIT; break;
-  }
-  i2s_channel_fmt_t channel_format;
-  switch (mic_format_) {
-    case 0: channel_format = I2S_CHANNEL_FMT_ONLY_LEFT; break;
-    case 1: channel_format = I2S_CHANNEL_FMT_ONLY_RIGHT; break;
-    case 2: channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT; break;
-    default: channel_format = I2S_CHANNEL_FMT_ONLY_LEFT; break;
-  }
-  const i2s_config_t i2s_config = {
-      .mode = i2s_mode_t(I2S_MODE_MASTER | I2S_MODE_RX),
-      .sample_rate = SAMPLE_RATE,
-      .bits_per_sample = bits_per_sample,
-      .channel_format = channel_format,
-      .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-      .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-      .dma_buf_count = mic_buf_count_,
-      .dma_buf_len = mic_buf_len_
-  };
-  const i2s_pin_config_t pin_config = {
-      .bck_io_num = mic_bck_pin_,
-      .ws_io_num = mic_ws_pin_,
-      .data_out_num = -1,
-      .data_in_num = mic_data_pin_
-  };
-  err = i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
-  if (err != ESP_OK) {
-    ESP_LOGE(TAG, "Failed installing mic driver: %d", err);
-    return -1;
-  }
-  err = i2s_set_pin(I2S_NUM_0, &pin_config);
-  if (err != ESP_OK) {
-    ESP_LOGE(TAG, "Failed setting mic pin: %d", err);
-    return -1;
-  }
-  return 0;
-}
-
-int Voip::init_i2s_amp() {
-  esp_err_t err;
-  i2s_bits_per_sample_t bits_per_sample;
-  switch (amp_bits_) {
-    case 16: bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT; break;
-    case 24: bits_per_sample = I2S_BITS_PER_SAMPLE_24BIT; break;
-    case 32: bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT; break;
-    default: bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT; break;
-  }
-  i2s_channel_fmt_t channel_format;
-  switch (amp_format_) {
-    case 0: channel_format = I2S_CHANNEL_FMT_ONLY_LEFT; break;
-    case 1: channel_format = I2S_CHANNEL_FMT_ONLY_RIGHT; break;
-    case 2: channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT; break;
-    default: channel_format = I2S_CHANNEL_FMT_ONLY_LEFT; break;
-  }
-  const i2s_config_t i2s_config = {
-      .mode = i2s_mode_t(I2S_MODE_MASTER | I2S_MODE_TX),
-      .sample_rate = SAMPLE_RATE,
-      .bits_per_sample = bits_per_sample,
-      .channel_format = channel_format,
-      .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-      .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-      .dma_buf_count = amp_buf_count_,
-      .dma_buf_len = amp_buf_len_
-  };
-  const i2s_pin_config_t pin_config = {
-      .bck_io_num = amp_bck_pin_,
-      .ws_io_num = amp_ws_pin_,
-      .data_out_num = amp_data_pin_,
-      .data_in_num = -1
-  };
-  err = i2s_driver_install(I2S_NUM_1, &i2s_config, 0, NULL);
-  if (err != ESP_OK) {
-    ESP_LOGE(TAG, "Failed installing amp driver: %d", err);
-    return -1;
-  }
-  err = i2s_set_pin(I2S_NUM_1, &pin_config);
-  if (err != ESP_OK) {
-    ESP_LOGE(TAG, "Failed setting amp pin: %d", err);
-    return -1;
-  }
-  return 0;
-}
-
 void Voip::handle_incoming_rtp() {
   if (codec_type_ == 0) {
     // PCMU
     int16_t buffer[500];
     struct sockaddr_in remote;
     socklen_t addrlen = sizeof(remote);
-    packet_size_ = this->rtp_udp_->recvfrom(rtp_buffer_, sizeof(rtp_buffer_), MSG_DONTWAIT, (struct sockaddr *)&remote, &addrlen);
+    packet_size_ = this->rtp_udp_->recvfrom(rtp_buffer_, sizeof(rtp_buffer_), (struct sockaddr *)&remote, &addrlen);
     if (packet_size_ > 0 && rx_stream_is_running_) {
       uint8_t *payload = rtp_buffer_ + 12; // Skip RTP header
       rtppkg_size_ = packet_size_ - 12;
       for (int i = 0; i < rtppkg_size_; i++) {
         buffer[i] = ulaw2linear(payload[i]) * amp_gain_;
       }
-      size_t bytes_written;
-      speaker_->write(buffer, sizeof(int16_t) * rtppkg_size_, &bytes_written);
+      speaker_->play((const uint8_t *)buffer, sizeof(int16_t) * rtppkg_size_);
     }
   } else if (codec_type_ == 1) {
     // PCMA
     int16_t buffer[500];
     struct sockaddr_in remote;
     socklen_t addrlen = sizeof(remote);
-    packet_size_ = this->rtp_udp_->recvfrom(rtp_buffer_, sizeof(rtp_buffer_), MSG_DONTWAIT, (struct sockaddr *)&remote, &addrlen);
+    packet_size_ = this->rtp_udp_->recvfrom(rtp_buffer_, sizeof(rtp_buffer_), (struct sockaddr *)&remote, &addrlen);
     if (packet_size_ > 0 && rx_stream_is_running_) {
       uint8_t *payload = rtp_buffer_ + 12;
       rtppkg_size_ = packet_size_ - 12;
       for (int i = 0; i < rtppkg_size_; i++) {
         buffer[i] = alaw2linear(payload[i]) * amp_gain_;
       }
-      size_t bytes_written;
-      speaker_->write(buffer, sizeof(int16_t) * rtppkg_size_, &bytes_written);
+      speaker_->play((const uint8_t *)buffer, sizeof(int16_t) * rtppkg_size_);
     }
   }
 }
@@ -853,13 +743,13 @@ void Voip::handle_outgoing_rtp() {
   if (!sip_->audioport.empty() && !tx_stream_is_running_) {
     tx_stream_is_running_ = true;
     ESP_LOGI(TAG, "Starting RTP stream");
-    tx_interval_ = esphome::scheduler::set_interval(this, [this]() { tx_rtp(); }, std::chrono::milliseconds(20));
+    tx_interval_ = App.scheduler.set_interval(this, [this]() { tx_rtp(); }, 20);
   } else if (sip_->audioport.empty() && tx_stream_is_running_) {
     tx_stream_is_running_ = false;
     rx_stream_is_running_ = false;
     rtppkg_size_ = -1;
     ESP_LOGI(TAG, "RTP stream stopped");
-    esphome::scheduler::cancel_interval(tx_interval_);
+    App.scheduler.cancel_interval(tx_interval_);
   }
 }
 
@@ -875,7 +765,7 @@ void Voip::tx_rtp() {
     for (int i = 0; i < 160; i++) {
       SAMPLE_T sample = 0;
       size_t bytes_read;
-      microphone_->read(&sample, sizeof(SAMPLE_T), &bytes_read);
+      microphone_->read_(&sample, sizeof(SAMPLE_T), &bytes_read);
       if (bytes_read > 0) {
         temp[i] = linear2ulaw(MIC_CONVERT(sample) * mic_gain_);
       }
@@ -898,7 +788,7 @@ void Voip::tx_rtp() {
     for (int i = 0; i < 160; i++) {
       SAMPLE_T sample = 0;
       size_t bytes_read;
-      microphone_->read(&sample, sizeof(SAMPLE_T), &bytes_read);
+      microphone_->read_(&sample, sizeof(SAMPLE_T), &bytes_read);
       if (bytes_read > 0) {
         temp[i] = linear2alaw(MIC_CONVERT(sample) * mic_gain_);
       }

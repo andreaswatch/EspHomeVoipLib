@@ -105,7 +105,7 @@ class Voip : public Component {
   Sip *sip_;
   std::unique_ptr<socket::Socket> rtp_udp_;
   char rtpPacketBuffer[1024];
-  esphome::scheduler::IntervalHandle tx_interval_;
+  esphome::Scheduler::IntervalHandle tx_interval_;
   bool tx_stream_is_running_ = false;
   bool rx_stream_is_running_ = false;
   int rtppkg_size_ = -1;
