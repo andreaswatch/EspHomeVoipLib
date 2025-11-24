@@ -2,7 +2,10 @@
 #define ESPHOME_VOIP_H
 
 #include "esphome.h"
-#include <driver/i2s_std.h>
+#include <driver/i2s.h>
+#include "esphome/core/network.h"
+#include "esphome/core/scheduler.h"
+#include "esphome/components/i2s_audio/i2s_audio.h"
 #include "g711.h"
 
 namespace esphome {
@@ -91,13 +94,13 @@ class Voip : public Component {
   void set_codec(int codec);
   void set_mic_gain(int gain) { mic_gain_ = gain; }
   void set_amp_gain(int gain) { amp_gain_ = gain; }
-  void set_mic_i2s_config(int bck_pin, int ws_pin, int data_pin, int bits, int format, int buf_count, int buf_len);
-  void set_amp_i2s_config(int bck_pin, int ws_pin, int data_pin, int bits, int format, int buf_count, int buf_len);
+  void set_mic_id(const std::string &id) { mic_id_ = id; }
+  void set_speaker_id(const std::string &id) { speaker_id_ = id; }
 
  protected:
   Sip *sip_;
   network::UdpSocket rtp_udp_;
-  scheduler::IntervalHandle tx_interval_;
+  esphome::scheduler::IntervalHandle tx_interval_;
   bool tx_stream_is_running_ = false;
   bool rx_stream_is_running_ = false;
   int rtppkg_size_ = -1;
@@ -111,35 +114,14 @@ class Voip : public Component {
   std::string sip_ip_;
   std::string sip_user_;
   std::string sip_pass_;
-  // I2S configs
-  int mic_bck_pin_ = 26;
-  int mic_ws_pin_ = 25;
-  int mic_data_pin_ = 33;
-  int mic_bits_ = 24;
-  int mic_format_ = 0;
-  int mic_buf_count_ = 4;
-  int mic_buf_len_ = 8;
-  int amp_bck_pin_ = 14;
-  int amp_ws_pin_ = 12;
-  int amp_data_pin_ = 27;
-  int amp_bits_ = 16;
-  int amp_format_ = 0;
-  int amp_buf_count_ = 16;
-  int amp_buf_len_ = 60;
-  // Opus
-  // OpusEncoder *opus_encoder_ = nullptr;
-  // OpusDecoder *opus_decoder_ = nullptr;
-  uint8_t opus_buffer_[256];
+  std::string mic_id_;
+  std::string speaker_id_;
+  i2s_audio::I2SAudioMicrophone *microphone_;
+  i2s_audio::I2SAudioSpeaker *speaker_;
 
   void handle_incoming_rtp();
   void handle_outgoing_rtp();
   void tx_rtp();
-  int init_i2s_mic();
-  int init_i2s_amp();
-  void start_i2s();
-  void stop_i2s();
-  esp_err_t read_from_mic(void *dest, size_t size, size_t *bytes_read);
-  esp_err_t write_to_amp(const void *src, size_t size, size_t *bytes_written);
 };
 
 }  // namespace voip

@@ -613,18 +613,20 @@ Voip::~Voip() {
 }
 
 void Voip::setup() {
-  my_ip_ = network::get_ip_address().str();
+  my_ip_ = network::get_ip_addresses().front().str();
   rtp_udp_.bind(1234);
   ESP_LOGI(TAG, "rtp_udp listen on (port:1234)");
   sip_ = new Sip();
   sip_->init(sip_ip_, sip_port_, my_ip_, sip_port_, sip_user_, sip_pass_);
 
-  if (init_i2s_mic() != 0) {
-    ESP_LOGE(TAG, "Failed to init I2S mic");
+  microphone_ = esphome::App::get_component<i2s_audio::I2SAudioMicrophone>(mic_id_);
+  speaker_ = esphome::App::get_component<i2s_audio::I2SAudioSpeaker>(speaker_id_);
+  if (microphone_ == nullptr) {
+    ESP_LOGE(TAG, "Microphone not found");
     return;
   }
-  if (init_i2s_amp() != 0) {
-    ESP_LOGE(TAG, "Failed to init I2S amp");
+  if (speaker_ == nullptr) {
+    ESP_LOGE(TAG, "Speaker not found");
     return;
   }
 }
@@ -652,7 +654,6 @@ void Voip::init(const std::string &sip_ip, const std::string &sip_user, const st
 
 void Voip::dial(const std::string &number, const std::string &id) {
   ESP_LOGI(TAG, "Dialing %s", number.c_str());
-  start_i2s();
   rx_stream_is_running_ = true;
   sip_->dial(number, id);
 }
@@ -792,7 +793,7 @@ void Voip::handle_incoming_rtp() {
         buffer[i] = ulaw2linear(payload[i]) * amp_gain_;
       }
       size_t bytes_written;
-      write_to_amp(buffer, sizeof(int16_t) * rtppkg_size_, &bytes_written);
+      speaker_->write(buffer, sizeof(int16_t) * rtppkg_size_, &bytes_written);
     } else {
       // No flush in ESPHome UdpSocket, perhaps just ignore
     }
@@ -807,7 +808,7 @@ void Voip::handle_incoming_rtp() {
         buffer[i] = alaw2linear(payload[i]) * amp_gain_;
       }
       size_t bytes_written;
-      write_to_amp(buffer, sizeof(int16_t) * rtppkg_size_, &bytes_written);
+      speaker_->write(buffer, sizeof(int16_t) * rtppkg_size_, &bytes_written);
     } else {
       // No flush
     }
@@ -820,14 +821,13 @@ void Voip::handle_outgoing_rtp() {
   if (!sip_->audioport.empty() && !tx_stream_is_running_) {
     tx_stream_is_running_ = true;
     ESP_LOGI(TAG, "Starting RTP stream");
-    tx_interval_ = scheduler::set_interval(this, [this]() { tx_rtp(); }, 20_ms);
+    tx_interval_ = esphome::scheduler::set_interval(this, [this]() { tx_rtp(); }, std::chrono::milliseconds(20));
   } else if (sip_->audioport.empty() && tx_stream_is_running_) {
     tx_stream_is_running_ = false;
     rx_stream_is_running_ = false;
     rtppkg_size_ = -1;
     ESP_LOGI(TAG, "RTP stream stopped");
-    scheduler::cancel_interval(tx_interval_);
-    stop_i2s();
+    esphome::scheduler::cancel_interval(tx_interval_);
   }
 }
 
@@ -843,7 +843,7 @@ void Voip::tx_rtp() {
     for (int i = 0; i < 160; i++) {
       SAMPLE_T sample = 0;
       size_t bytes_read;
-      read_from_mic(&sample, sizeof(SAMPLE_T), &bytes_read);
+      microphone_->read(&sample, sizeof(SAMPLE_T), &bytes_read);
       if (bytes_read > 0) {
         temp[i] = linear2ulaw(MIC_CONVERT(sample) * mic_gain_);
       }
@@ -863,7 +863,7 @@ void Voip::tx_rtp() {
     for (int i = 0; i < 160; i++) {
       SAMPLE_T sample = 0;
       size_t bytes_read;
-      read_from_mic(&sample, sizeof(SAMPLE_T), &bytes_read);
+      microphone_->read(&sample, sizeof(SAMPLE_T), &bytes_read);
       if (bytes_read > 0) {
         temp[i] = linear2alaw(MIC_CONVERT(sample) * mic_gain_);
       }
@@ -878,25 +878,6 @@ void Voip::tx_rtp() {
     network::IPAddress ip(sip_->get_sip_server_ip().c_str());
     rtp_udp_.sendto(packet_buffer, 12 + 160, ip, atoi(sip_->audioport.c_str()));
   }
-}
-
-void Voip::start_i2s() {
-  i2s_start(I2S_NUM_1);
-  ESP_LOGI(TAG, "I2S amp started");
-}
-
-void Voip::stop_i2s() {
-  i2s_stop(I2S_NUM_0);
-  i2s_stop(I2S_NUM_1);
-  ESP_LOGI(TAG, "I2S stopped");
-}
-
-esp_err_t Voip::read_from_mic(void *dest, size_t size, size_t *bytes_read) {
-  return i2s_read(I2S_NUM_0, dest, size, bytes_read, portMAX_DELAY);
-}
-
-esp_err_t Voip::write_to_amp(const void *src, size_t size, size_t *bytes_written) {
-  return i2s_write(I2S_NUM_1, src, size, bytes_written, portMAX_DELAY);
 }
 
 }  // namespace voip

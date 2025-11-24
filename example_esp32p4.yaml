@@ -27,6 +27,38 @@ wifi:
   ssid: "YourWiFiSSID"
   password: "YourWiFiPassword"
 
+# I2S Audio
+i2s_audio:
+  - id: i2s_out
+    i2s_lrclk_pin: GPIO8
+    i2s_bclk_pin: GPIO9
+  
+  - id: i2s_in
+    i2s_lrclk_pin: GPIO4
+    i2s_bclk_pin: GPIO5
+
+# Mikrofon
+microphone:
+  - platform: i2s_audio
+    id: board_microphone
+    adc_type: external
+    i2s_audio_id: i2s_in
+    i2s_din_pin: GPIO6
+    pdm: false
+    channel: left
+    sample_rate: 16000
+    bits_per_sample: 16bit
+
+# Lautsprecher
+speaker:
+  - platform: i2s_audio
+    id: board_speaker
+    i2s_audio_id: i2s_out
+    dac_type: external
+    i2s_dout_pin: GPIO10
+    sample_rate: 16000
+    bits_per_sample: 16bit
+
 # VoIP-Komponente
 voip:
   id: my_voip
@@ -36,22 +68,8 @@ voip:
   codec: 0               # 0=PCMU, 1=PCMA, 2=G.721
   mic_gain: 2
   amp_gain: 6
-  # I2S-Konfiguration für Mikrofon (angepasst an ESP32-P4 Dev Kit)
-  mic_bck_pin: 5         # GPIO5 (i2s_bclk_pin für i2s_in)
-  mic_ws_pin: 4          # GPIO4 (i2s_lrclk_pin für i2s_in)
-  mic_data_pin: 6        # GPIO6 (i2s_din_pin)
-  mic_bits: 24
-  mic_format: 0
-  mic_buf_count: 4
-  mic_buf_len: 8
-  # I2S-Konfiguration für Verstärker (angepasst an ESP32-P4 Dev Kit)
-  amp_bck_pin: 9         # GPIO9 (i2s_bclk_pin für i2s_out)
-  amp_ws_pin: 8          # GPIO8 (i2s_lrclk_pin für i2s_out)
-  amp_data_pin: 10       # GPIO10 (i2s_dout_pin)
-  amp_bits: 16
-  amp_format: 0
-  amp_buf_count: 16
-  amp_buf_len: 60
+  mic_id: board_microphone
+  speaker_id: board_speaker
 
 # Beispiel-Buttons zum Testen
 button:
