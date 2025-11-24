@@ -4,6 +4,10 @@
 #include "esphome.h"
 #include <driver/i2s.h>
 #include "g711.h"
+#include <memory>
+#include "esphome/components/socket/socket.h"
+#include "esphome/core/scheduler.h"
+#include <chrono>
 
 namespace esphome {
 namespace voip {
@@ -26,7 +30,8 @@ class Sip : public Component {
   std::string audioport;
 
  protected:
-  // network::UdpSocket udp_;
+  std::unique_ptr<socket::Socket> udp_;
+  char packetBuffer[1024];
   char *p_buf_;
   size_t l_buf_;
   char ca_read_[256];
@@ -98,8 +103,9 @@ class Voip : public Component {
 
  protected:
   Sip *sip_;
-  // network::UdpSocket rtp_udp_;
-  // esphome::scheduler::IntervalHandle tx_interval_;
+  std::unique_ptr<socket::Socket> rtp_udp_;
+  char rtpPacketBuffer[1024];
+  esphome::scheduler::IntervalHandle tx_interval_;
   bool tx_stream_is_running_ = false;
   bool rx_stream_is_running_ = false;
   int rtppkg_size_ = -1;

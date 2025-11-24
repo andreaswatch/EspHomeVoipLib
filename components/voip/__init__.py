@@ -4,7 +4,7 @@ from esphome.components.i2s_audio.microphone import I2SAudioMicrophone
 from esphome.components.i2s_audio.speaker import I2SAudioSpeaker
 from esphome.const import CONF_ID
 
-DEPENDENCIES = []
+DEPENDENCIES = ["socket"]
 AUTO_LOAD = []
 
 voip_ns = cg.esphome_ns.namespace('voip')

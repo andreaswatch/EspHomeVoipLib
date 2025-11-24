@@ -5,6 +5,8 @@
 #include "esphome/core/hal.h"
 #include <esp_system.h>
 #include "mbedtls/md5.h"
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 namespace esphome {
 namespace voip {
@@ -35,7 +37,19 @@ void Sip::dump_config() {
 }
 
 void Sip::init(const std::string &sip_ip, int sip_port, const std::string &my_ip, int my_port, const std::string &sip_user, const std::string &sip_pass) {
-  udp_.bind(sip_port);
+  this->udp_ = socket::socket(AF_INET, SOCK_DGRAM, 0);
+  if (this->udp_ == nullptr) {
+    ESP_LOGE(TAG, "Failed to create SIP UDP socket");
+    return;
+  }
+  struct sockaddr_in addr = {};
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(sip_port);
+  addr.sin_addr.s_addr = INADDR_ANY;
+  if (this->udp_->bind((struct sockaddr *)&addr, sizeof(addr)) != 0) {
+    ESP_LOGE(TAG, "Failed to bind SIP UDP socket");
+    return;
+  }
   memset(ca_read_, 0, sizeof(ca_read_));
   memset(p_buf_, 0, l_buf_);
   p_sip_ip_ = sip_ip;
@@ -279,13 +293,15 @@ void Sip::handle_udp_packet() {
   char *p;
   char ca_sip_in[2048];
   int packet_size = 0;
-  if (udp_.has_packet()) {
-    packet_size = udp_.read(ca_sip_in, sizeof(ca_sip_in));
-    ESP_LOGD(TAG, "Received SIP packet from %s:%d size %d", udp_.get_remote_ip().str().c_str(), udp_.get_remote_port(), packet_size);
-    if (packet_size > 0) {
-      ca_sip_in[packet_size] = 0;
-      ESP_LOGD(TAG, "Response status: %s", strstr(ca_sip_in, "SIP/2.0") ? strstr(ca_sip_in, "SIP/2.0") : "No SIP/2.0");
-    }
+  struct sockaddr_in remote;
+  socklen_t addrlen = sizeof(remote);
+  packet_size = this->udp_->recvfrom(ca_sip_in, sizeof(ca_sip_in), MSG_DONTWAIT, (struct sockaddr *)&remote, &addrlen);
+  if (packet_size > 0) {
+    char ip_str[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &remote.sin_addr, ip_str, sizeof(ip_str));
+    ESP_LOGD(TAG, "Received SIP packet from %s:%d size %d", ip_str, ntohs(remote.sin_port), packet_size);
+    ca_sip_in[packet_size] = 0;
+    ESP_LOGD(TAG, "Response status: %s", strstr(ca_sip_in, "SIP/2.0") ? strstr(ca_sip_in, "SIP/2.0") : "No SIP/2.0");
   }
   if (packet_size > 0) {
     p = ca_sip_in;
@@ -390,7 +406,11 @@ void Sip::handle_udp_packet() {
 
 int Sip::send_udp() {
   ESP_LOGD(TAG, "Sending SIP packet to %s:%d", p_sip_ip_.c_str(), i_sip_port_);
-  udp_.sendto((uint8_t *)p_buf_, strlen(p_buf_), network::IPAddress(p_sip_ip_.c_str()), i_sip_port_);
+  struct sockaddr_in remote = {};
+  remote.sin_family = AF_INET;
+  remote.sin_port = htons(i_sip_port_);
+  inet_pton(AF_INET, p_sip_ip_.c_str(), &remote.sin_addr);
+  this->udp_->sendto((uint8_t *)p_buf_, strlen(p_buf_), 0, (struct sockaddr *)&remote, sizeof(remote));
   return 0;
 }
 
@@ -616,8 +636,20 @@ Voip::~Voip() {
 
 void Voip::setup() {
   // my_ip_ = network::get_ip_addresses().front().str();
-  // rtp_udp_.bind(1234);
-  // ESP_LOGI(TAG, "rtp_udp listen on (port:1234)");
+  this->rtp_udp_ = socket::socket(AF_INET, SOCK_DGRAM, 0);
+  if (this->rtp_udp_ == nullptr) {
+    ESP_LOGE(TAG, "Failed to create RTP UDP socket");
+    return;
+  }
+  struct sockaddr_in rtp_addr = {};
+  rtp_addr.sin_family = AF_INET;
+  rtp_addr.sin_port = htons(1234);
+  rtp_addr.sin_addr.s_addr = INADDR_ANY;
+  if (this->rtp_udp_->bind((struct sockaddr *)&rtp_addr, sizeof(rtp_addr)) != 0) {
+    ESP_LOGE(TAG, "Failed to bind RTP UDP socket");
+    return;
+  }
+  ESP_LOGI(TAG, "RTP listen on port 1234");
   sip_ = new Sip();
   sip_->init(sip_ip_, sip_port_, "192.168.1.100", sip_port_, sip_user_, sip_pass_);
 
@@ -635,8 +667,8 @@ void Voip::setup() {
 
 void Voip::loop() {
   // if (network::is_connected()) {
-    // handle_incoming_rtp();
-    // handle_outgoing_rtp();
+    handle_incoming_rtp();
+    handle_outgoing_rtp();
     sip_->loop();
   // }
 }
@@ -787,8 +819,10 @@ void Voip::handle_incoming_rtp() {
   if (codec_type_ == 0) {
     // PCMU
     int16_t buffer[500];
-    if (rtp_udp_.has_packet() && rx_stream_is_running_) {
-      packet_size_ = rtp_udp_.read(rtp_buffer_, sizeof(rtp_buffer_));
+    struct sockaddr_in remote;
+    socklen_t addrlen = sizeof(remote);
+    packet_size_ = this->rtp_udp_->recvfrom(rtp_buffer_, sizeof(rtp_buffer_), MSG_DONTWAIT, (struct sockaddr *)&remote, &addrlen);
+    if (packet_size_ > 0 && rx_stream_is_running_) {
       uint8_t *payload = rtp_buffer_ + 12; // Skip RTP header
       rtppkg_size_ = packet_size_ - 12;
       for (int i = 0; i < rtppkg_size_; i++) {
@@ -796,14 +830,14 @@ void Voip::handle_incoming_rtp() {
       }
       size_t bytes_written;
       speaker_->write(buffer, sizeof(int16_t) * rtppkg_size_, &bytes_written);
-    } else {
-      // No flush in ESPHome UdpSocket, perhaps just ignore
     }
   } else if (codec_type_ == 1) {
     // PCMA
     int16_t buffer[500];
-    if (rtp_udp_.has_packet() && rx_stream_is_running_) {
-      packet_size_ = rtp_udp_.read(rtp_buffer_, sizeof(rtp_buffer_));
+    struct sockaddr_in remote;
+    socklen_t addrlen = sizeof(remote);
+    packet_size_ = this->rtp_udp_->recvfrom(rtp_buffer_, sizeof(rtp_buffer_), MSG_DONTWAIT, (struct sockaddr *)&remote, &addrlen);
+    if (packet_size_ > 0 && rx_stream_is_running_) {
       uint8_t *payload = rtp_buffer_ + 12;
       rtppkg_size_ = packet_size_ - 12;
       for (int i = 0; i < rtppkg_size_; i++) {
@@ -811,75 +845,77 @@ void Voip::handle_incoming_rtp() {
       }
       size_t bytes_written;
       speaker_->write(buffer, sizeof(int16_t) * rtppkg_size_, &bytes_written);
-    } else {
-      // No flush
     }
-  } else {
-    // No flush
   }
 }
 
 void Voip::handle_outgoing_rtp() {
-  // if (!sip_->audioport.empty() && !tx_stream_is_running_) {
-  //   tx_stream_is_running_ = true;
-  //   ESP_LOGI(TAG, "Starting RTP stream");
-  //   tx_interval_ = esphome::scheduler::set_interval(this, [this]() { tx_rtp(); }, std::chrono::milliseconds(20));
-  // } else if (sip_->audioport.empty() && tx_stream_is_running_) {
-  //   tx_stream_is_running_ = false;
-  //   rx_stream_is_running_ = false;
-  //   rtppkg_size_ = -1;
-  //   ESP_LOGI(TAG, "RTP stream stopped");
-  //   esphome::scheduler::cancel_interval(tx_interval_);
-  // }
+  if (!sip_->audioport.empty() && !tx_stream_is_running_) {
+    tx_stream_is_running_ = true;
+    ESP_LOGI(TAG, "Starting RTP stream");
+    tx_interval_ = esphome::scheduler::set_interval(this, [this]() { tx_rtp(); }, std::chrono::milliseconds(20));
+  } else if (sip_->audioport.empty() && tx_stream_is_running_) {
+    tx_stream_is_running_ = false;
+    rx_stream_is_running_ = false;
+    rtppkg_size_ = -1;
+    ESP_LOGI(TAG, "RTP stream stopped");
+    esphome::scheduler::cancel_interval(tx_interval_);
+  }
 }
 
 void Voip::tx_rtp() {
-  // static uint16_t sequence_number = 0;
-  // static uint32_t timestamp = 0;
-  // const uint32_t ssrc = 3124150;
-  // uint8_t packet_buffer[255];
+  static uint16_t sequence_number = 0;
+  static uint32_t timestamp = 0;
+  const uint32_t ssrc = 3124150;
+  uint8_t packet_buffer[255];
 
-  // if (codec_type_ == 0) {
-  //   // PCMU
-  //   uint8_t temp[160];
-  //   for (int i = 0; i < 160; i++) {
-  //     SAMPLE_T sample = 0;
-  //     size_t bytes_read;
-  //     microphone_->read(&sample, sizeof(SAMPLE_T), &bytes_read);
-  //     if (bytes_read > 0) {
-  //       temp[i] = linear2ulaw(MIC_CONVERT(sample) * mic_gain_);
-  //     }
-  //   }
-  //   uint8_t *rtp_header = packet_buffer;
-  //   rtp_header[0] = 0x80;
-  //   rtp_header[1] = 0;
-  //   *(uint16_t *)(rtp_header + 2) = htons(sequence_number++);
-  //   *(uint32_t *)(rtp_header + 4) = htonl(timestamp += 160);
-  //   *(uint32_t *)(rtp_header + 8) = htonl(ssrc);
-  //   memcpy(rtp_header + 12, temp, 160);
-  //   network::IPAddress ip(sip_->get_sip_server_ip().c_str());
-  //   rtp_udp_.sendto(packet_buffer, 12 + 160, ip, atoi(sip_->audioport.c_str()));
-  // } else if (codec_type_ == 1) {
-  //   // PCMA
-  //   uint8_t temp[160];
-  //   for (int i = 0; i < 160; i++) {
-  //     SAMPLE_T sample = 0;
-  //     size_t bytes_read;
-  //     microphone_->read(&sample, sizeof(SAMPLE_T), &bytes_read);
-  //     if (bytes_read > 0) {
-  //       temp[i] = linear2alaw(MIC_CONVERT(sample) * mic_gain_);
-  //     }
-  //   }
-  //   uint8_t *rtp_header = packet_buffer;
-  //   rtp_header[0] = 0x80;
-  //   rtp_header[1] = 8;
-  //   *(uint16_t *)(rtp_header + 2) = htons(sequence_number++);
-  //   *(uint32_t *)(rtp_header + 4) = htonl(timestamp += 160);
-  //   *(uint32_t *)(rtp_header + 8) = htonl(ssrc);
-  //   memcpy(rtp_header + 12, temp, 160);
-  //   network::IPAddress ip(sip_->get_sip_server_ip().c_str());
-  //   rtp_udp_.sendto(packet_buffer, 12 + 160, ip, atoi(sip_->audioport.c_str()));
-  // }
+  if (codec_type_ == 0) {
+    // PCMU
+    uint8_t temp[160];
+    for (int i = 0; i < 160; i++) {
+      SAMPLE_T sample = 0;
+      size_t bytes_read;
+      microphone_->read(&sample, sizeof(SAMPLE_T), &bytes_read);
+      if (bytes_read > 0) {
+        temp[i] = linear2ulaw(MIC_CONVERT(sample) * mic_gain_);
+      }
+    }
+    uint8_t *rtp_header = packet_buffer;
+    rtp_header[0] = 0x80;
+    rtp_header[1] = 0;
+    *(uint16_t *)(rtp_header + 2) = htons(sequence_number++);
+    *(uint32_t *)(rtp_header + 4) = htonl(timestamp += 160);
+    *(uint32_t *)(rtp_header + 8) = htonl(ssrc);
+    memcpy(rtp_header + 12, temp, 160);
+    struct sockaddr_in remote = {};
+    remote.sin_family = AF_INET;
+    remote.sin_port = htons(atoi(sip_->audioport.c_str()));
+    inet_pton(AF_INET, sip_->get_sip_server_ip().c_str(), &remote.sin_addr);
+    this->rtp_udp_->sendto(packet_buffer, 12 + 160, 0, (struct sockaddr *)&remote, sizeof(remote));
+  } else if (codec_type_ == 1) {
+    // PCMA
+    uint8_t temp[160];
+    for (int i = 0; i < 160; i++) {
+      SAMPLE_T sample = 0;
+      size_t bytes_read;
+      microphone_->read(&sample, sizeof(SAMPLE_T), &bytes_read);
+      if (bytes_read > 0) {
+        temp[i] = linear2alaw(MIC_CONVERT(sample) * mic_gain_);
+      }
+    }
+    uint8_t *rtp_header = packet_buffer;
+    rtp_header[0] = 0x80;
+    rtp_header[1] = 8;
+    *(uint16_t *)(rtp_header + 2) = htons(sequence_number++);
+    *(uint32_t *)(rtp_header + 4) = htonl(timestamp += 160);
+    *(uint32_t *)(rtp_header + 8) = htonl(ssrc);
+    memcpy(rtp_header + 12, temp, 160);
+    struct sockaddr_in remote = {};
+    remote.sin_family = AF_INET;
+    remote.sin_port = htons(atoi(sip_->audioport.c_str()));
+    inet_pton(AF_INET, sip_->get_sip_server_ip().c_str(), &remote.sin_addr);
+    this->rtp_udp_->sendto(packet_buffer, 12 + 160, 0, (struct sockaddr *)&remote, sizeof(remote));
+  }
 }
 
 }  // namespace voip
