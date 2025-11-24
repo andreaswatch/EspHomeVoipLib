@@ -9,6 +9,8 @@
 namespace esphome {
 namespace voip {
 
+using namespace esphome::i2s_audio;
+
 static const char *const TAG = "voip";
 
 Sip::Sip() : p_buf_(nullptr), l_buf_(2048), i_last_cseq_(0), codec_(0) {
@@ -613,14 +615,14 @@ Voip::~Voip() {
 }
 
 void Voip::setup() {
-  my_ip_ = network::get_ip_addresses().front().str();
-  rtp_udp_.bind(1234);
-  ESP_LOGI(TAG, "rtp_udp listen on (port:1234)");
+  // my_ip_ = network::get_ip_addresses().front().str();
+  // rtp_udp_.bind(1234);
+  // ESP_LOGI(TAG, "rtp_udp listen on (port:1234)");
   sip_ = new Sip();
-  sip_->init(sip_ip_, sip_port_, my_ip_, sip_port_, sip_user_, sip_pass_);
+  sip_->init(sip_ip_, sip_port_, "192.168.1.100", sip_port_, sip_user_, sip_pass_);
 
-  microphone_ = esphome::App::get_component<i2s_audio::I2SAudioMicrophone>(mic_id_);
-  speaker_ = esphome::App::get_component<i2s_audio::I2SAudioSpeaker>(speaker_id_);
+  microphone_ = esphome::App::get_component<I2SAudioMicrophone>(mic_id_);
+  speaker_ = esphome::App::get_component<I2SAudioSpeaker>(speaker_id_);
   if (microphone_ == nullptr) {
     ESP_LOGE(TAG, "Microphone not found");
     return;
@@ -632,11 +634,11 @@ void Voip::setup() {
 }
 
 void Voip::loop() {
-  if (network::is_connected()) {
-    handle_incoming_rtp();
-    handle_outgoing_rtp();
+  // if (network::is_connected()) {
+    // handle_incoming_rtp();
+    // handle_outgoing_rtp();
     sip_->loop();
-  }
+  // }
 }
 
 void Voip::dump_config() {
@@ -818,66 +820,66 @@ void Voip::handle_incoming_rtp() {
 }
 
 void Voip::handle_outgoing_rtp() {
-  if (!sip_->audioport.empty() && !tx_stream_is_running_) {
-    tx_stream_is_running_ = true;
-    ESP_LOGI(TAG, "Starting RTP stream");
-    tx_interval_ = esphome::scheduler::set_interval(this, [this]() { tx_rtp(); }, std::chrono::milliseconds(20));
-  } else if (sip_->audioport.empty() && tx_stream_is_running_) {
-    tx_stream_is_running_ = false;
-    rx_stream_is_running_ = false;
-    rtppkg_size_ = -1;
-    ESP_LOGI(TAG, "RTP stream stopped");
-    esphome::scheduler::cancel_interval(tx_interval_);
-  }
+  // if (!sip_->audioport.empty() && !tx_stream_is_running_) {
+  //   tx_stream_is_running_ = true;
+  //   ESP_LOGI(TAG, "Starting RTP stream");
+  //   tx_interval_ = esphome::scheduler::set_interval(this, [this]() { tx_rtp(); }, std::chrono::milliseconds(20));
+  // } else if (sip_->audioport.empty() && tx_stream_is_running_) {
+  //   tx_stream_is_running_ = false;
+  //   rx_stream_is_running_ = false;
+  //   rtppkg_size_ = -1;
+  //   ESP_LOGI(TAG, "RTP stream stopped");
+  //   esphome::scheduler::cancel_interval(tx_interval_);
+  // }
 }
 
 void Voip::tx_rtp() {
-  static uint16_t sequence_number = 0;
-  static uint32_t timestamp = 0;
-  const uint32_t ssrc = 3124150;
-  uint8_t packet_buffer[255];
+  // static uint16_t sequence_number = 0;
+  // static uint32_t timestamp = 0;
+  // const uint32_t ssrc = 3124150;
+  // uint8_t packet_buffer[255];
 
-  if (codec_type_ == 0) {
-    // PCMU
-    uint8_t temp[160];
-    for (int i = 0; i < 160; i++) {
-      SAMPLE_T sample = 0;
-      size_t bytes_read;
-      microphone_->read(&sample, sizeof(SAMPLE_T), &bytes_read);
-      if (bytes_read > 0) {
-        temp[i] = linear2ulaw(MIC_CONVERT(sample) * mic_gain_);
-      }
-    }
-    uint8_t *rtp_header = packet_buffer;
-    rtp_header[0] = 0x80;
-    rtp_header[1] = 0;
-    *(uint16_t *)(rtp_header + 2) = htons(sequence_number++);
-    *(uint32_t *)(rtp_header + 4) = htonl(timestamp += 160);
-    *(uint32_t *)(rtp_header + 8) = htonl(ssrc);
-    memcpy(rtp_header + 12, temp, 160);
-    network::IPAddress ip(sip_->get_sip_server_ip().c_str());
-    rtp_udp_.sendto(packet_buffer, 12 + 160, ip, atoi(sip_->audioport.c_str()));
-  } else if (codec_type_ == 1) {
-    // PCMA
-    uint8_t temp[160];
-    for (int i = 0; i < 160; i++) {
-      SAMPLE_T sample = 0;
-      size_t bytes_read;
-      microphone_->read(&sample, sizeof(SAMPLE_T), &bytes_read);
-      if (bytes_read > 0) {
-        temp[i] = linear2alaw(MIC_CONVERT(sample) * mic_gain_);
-      }
-    }
-    uint8_t *rtp_header = packet_buffer;
-    rtp_header[0] = 0x80;
-    rtp_header[1] = 8;
-    *(uint16_t *)(rtp_header + 2) = htons(sequence_number++);
-    *(uint32_t *)(rtp_header + 4) = htonl(timestamp += 160);
-    *(uint32_t *)(rtp_header + 8) = htonl(ssrc);
-    memcpy(rtp_header + 12, temp, 160);
-    network::IPAddress ip(sip_->get_sip_server_ip().c_str());
-    rtp_udp_.sendto(packet_buffer, 12 + 160, ip, atoi(sip_->audioport.c_str()));
-  }
+  // if (codec_type_ == 0) {
+  //   // PCMU
+  //   uint8_t temp[160];
+  //   for (int i = 0; i < 160; i++) {
+  //     SAMPLE_T sample = 0;
+  //     size_t bytes_read;
+  //     microphone_->read(&sample, sizeof(SAMPLE_T), &bytes_read);
+  //     if (bytes_read > 0) {
+  //       temp[i] = linear2ulaw(MIC_CONVERT(sample) * mic_gain_);
+  //     }
+  //   }
+  //   uint8_t *rtp_header = packet_buffer;
+  //   rtp_header[0] = 0x80;
+  //   rtp_header[1] = 0;
+  //   *(uint16_t *)(rtp_header + 2) = htons(sequence_number++);
+  //   *(uint32_t *)(rtp_header + 4) = htonl(timestamp += 160);
+  //   *(uint32_t *)(rtp_header + 8) = htonl(ssrc);
+  //   memcpy(rtp_header + 12, temp, 160);
+  //   network::IPAddress ip(sip_->get_sip_server_ip().c_str());
+  //   rtp_udp_.sendto(packet_buffer, 12 + 160, ip, atoi(sip_->audioport.c_str()));
+  // } else if (codec_type_ == 1) {
+  //   // PCMA
+  //   uint8_t temp[160];
+  //   for (int i = 0; i < 160; i++) {
+  //     SAMPLE_T sample = 0;
+  //     size_t bytes_read;
+  //     microphone_->read(&sample, sizeof(SAMPLE_T), &bytes_read);
+  //     if (bytes_read > 0) {
+  //       temp[i] = linear2alaw(MIC_CONVERT(sample) * mic_gain_);
+  //     }
+  //   }
+  //   uint8_t *rtp_header = packet_buffer;
+  //   rtp_header[0] = 0x80;
+  //   rtp_header[1] = 8;
+  //   *(uint16_t *)(rtp_header + 2) = htons(sequence_number++);
+  //   *(uint32_t *)(rtp_header + 4) = htonl(timestamp += 160);
+  //   *(uint32_t *)(rtp_header + 8) = htonl(ssrc);
+  //   memcpy(rtp_header + 12, temp, 160);
+  //   network::IPAddress ip(sip_->get_sip_server_ip().c_str());
+  //   rtp_udp_.sendto(packet_buffer, 12 + 160, ip, atoi(sip_->audioport.c_str()));
+  // }
 }
 
 }  // namespace voip

@@ -3,14 +3,12 @@
 
 #include "esphome.h"
 #include <driver/i2s.h>
-#include "esphome/components/socket/udp_socket.h"
-#include "esphome/core/scheduler.h"
-#include "esphome/components/i2s_audio/i2s_audio.h"
-#include "esphome/components/network/util.h"
 #include "g711.h"
 
 namespace esphome {
 namespace voip {
+
+using namespace esphome::i2s_audio;
 
 class Sip : public Component {
  public:
@@ -28,7 +26,7 @@ class Sip : public Component {
   std::string audioport;
 
  protected:
-  network::UdpSocket udp_;
+  // network::UdpSocket udp_;
   char *p_buf_;
   size_t l_buf_;
   char ca_read_[256];
@@ -100,8 +98,8 @@ class Voip : public Component {
 
  protected:
   Sip *sip_;
-  network::UdpSocket rtp_udp_;
-  esphome::scheduler::IntervalHandle tx_interval_;
+  // network::UdpSocket rtp_udp_;
+  // esphome::scheduler::IntervalHandle tx_interval_;
   bool tx_stream_is_running_ = false;
   bool rx_stream_is_running_ = false;
   int rtppkg_size_ = -1;
@@ -117,8 +115,8 @@ class Voip : public Component {
   std::string sip_pass_;
   std::string mic_id_;
   std::string speaker_id_;
-  i2s_audio::I2SAudioMicrophone *microphone_;
-  i2s_audio::I2SAudioSpeaker *speaker_;
+  I2SAudioMicrophone *microphone_;
+  I2SAudioSpeaker *speaker_;
 
   void handle_incoming_rtp();
   void handle_outgoing_rtp();
