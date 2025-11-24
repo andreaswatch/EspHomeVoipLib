@@ -1,0 +1,19 @@
+{
+  "name": "voip",
+  "version": "1.0.0",
+  "description": "VoIP component with audio streaming for ESPHome",
+  "keywords": "esphome, voip, audio",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/andreaswatch/EspHomeVoipLib.git"
+  },
+  "authors": [
+    {
+      "name": "Andreas Watch"
+    }
+  ],
+  "license": "MIT",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "dependencies": []
+}

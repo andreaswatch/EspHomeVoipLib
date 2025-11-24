@@ -11,8 +11,6 @@ external_components:
   - source: github://andreaswatch/EspHomeVoipLib
 ```
 
-**Wichtig**: Klonen Sie dieses Repository mit Submodules: `git clone --recursive https://github.com/andreaswatch/EspHomeVoipLib.git`. Die externen Bibliotheken werden automatisch als Submodules geladen.
-
 ## Verwendung
 
 ### SIP-Komponente
@@ -64,54 +62,133 @@ voip:
 
 ## Abhängigkeiten
 
-Gemäß ESPHome-Guidelines für externe Komponenten werden Abhängigkeiten **nicht automatisch installiert**, um Benutzerkontrolle und Kompatibilität zu gewährleisten. Stattdessen müssen Sie sie manuell hinzufügen.
+- Zusätzliche Bibliotheken für Codecs:
+  - Opus (für Codec 2): Muss in der ESPHome-Umgebung verfügbar sein
+  - G.72x (für Codec 3): Muss in der ESPHome-Umgebung verfügbar sein
+  - G.711 (für Codec 0/1): Integriert
 
-### ESPHome-interne Abhängigkeiten
-- `i2s_audio`: Wird automatisch geladen, wenn die VoIP-Komponente verwendet wird (deklariert in `manifest.json`).
-
-### Externe PlatformIO-Bibliotheken (lib_deps)
-Diese werden automatisch über die Submodules geladen. Keine manuelle Installation erforderlich.
-
-- **ArduinoJson**: Für JSON-Verarbeitung.
-- **esp32_opus_arduino**: Für Opus-Codec.
-- **arduino-libg7xx**: Für G.72x-Codec.
-
-Wenn Sie die `platformio.ini` verwenden, sind die Pfade bereits konfiguriert.
-
-### Codecs
-- **G.711 (Codec 0/1)**: Integriert, keine zusätzlichen Libs erforderlich.
-- **Opus (Codec 2)**: Erfordert die Opus-Lib.
-- **G.72x (Codec 3)**: Erfordert die G.72x-Lib.
-
-Stellen Sie sicher, dass die Libs kompatibel mit Ihrer ESPHome-Version sind.
+Stellen Sie sicher, dass diese Bibliotheken installiert sind, z.B. über PlatformIO oder ESP-IDF.
 
 ## Beispiel-Konfiguration
 
-Eine vollständige, lauffähige Beispiel-Konfiguration finden Sie in `example.yaml`. Kopieren Sie diese Datei in Ihr ESPHome-Projekt und passen Sie die Werte an (z. B. WiFi, SIP-Daten).
-
-**Wichtig**: Fügen Sie die externen Abhängigkeiten hinzu (siehe Abhängigkeiten-Abschnitt) oder kopieren Sie die `platformio.ini` aus diesem Repository.
+Hier ist eine vollständige Beispiel-Konfiguration, die alle erforderlichen Abhängigkeiten und Einstellungen enthält. Kopieren Sie diese als Basis für Ihre `config.yaml`:
 
 ```yaml
-# Auszug aus example.yaml
 esphome:
-  name: voip-device-example
+  name: voip-device
 
 esp32:
   board: esp32dev
-  lib_deps:  # Fügen Sie diese hinzu
+  framework:
+    type: arduino
+    version: recommended
+  build_flags:
+    - -std=c++11
+    - -DARDUINO_ARCH_ESP32
+    - -DCORE_DEBUG_LEVEL=0
+  lib_deps:
     - ArduinoJson@^7.4.2
-    - ...
+    - viamgr/AwesomeClickButton@^1.0.1
+    - https://github.com/sh123/esp32_opus_arduino.git
+    - https://github.com/pschatzmann/arduino-libg7xx.git
 
 external_components:
   - source: github://andreaswatch/EspHomeVoipLib
 
-# ... Rest der Konfiguration
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+# Optional: OTA-Updates
+ota:
+  password: !secret ota_password
+
+# SIP-Komponente
+sip:
+  id: my_sip
+  sip_ip: !secret sip_server_ip
+  sip_port: 5060
+  my_ip: !secret local_ip
+  my_port: 5060
+  sip_user: !secret sip_user
+  sip_pass: !secret sip_pass
+  codec: 1
+
+# VoIP-Komponente
+voip:
+  id: my_voip
+  sip_ip: !secret sip_server_ip
+  sip_user: !secret sip_user
+  sip_pass: !secret sip_pass
+  codec: 1
+  mic_gain: 2
+  amp_gain: 6
+  mic_bck_pin: 26
+  mic_ws_pin: 25
+  mic_data_pin: 33
+  mic_bits: 24
+  mic_format: 0
+  mic_buf_count: 4
+  mic_buf_len: 8
+  amp_bck_pin: 14
+  amp_ws_pin: 12
+  amp_data_pin: 27
+  amp_bits: 16
+  amp_format: 0
+  amp_buf_count: 16
+  amp_buf_len: 60
+
+# Beispiel für einen Button zum Anrufen
+button:
+  - platform: template
+    name: "Call 123"
+    on_press:
+      - lambda: id(my_voip).dial("123", "Test Call");
+
+# Beispiel für einen Button zum Auflegen
+button:
+  - platform: template
+    name: "Hangup"
+    on_press:
+      - lambda: id(my_voip).hangup();
+
+# Optional: Logger für Debugging
+logger:
+  level: DEBUG
 ```
+
+## Testen mit ESPHome in Docker
+
+Um die Komponente zu testen, ohne ESPHome global zu installieren, verwenden Sie Docker:
+
+1. **Stellen Sie sicher, dass Docker installiert ist.**
+
+2. **Navigieren Sie zum Projektverzeichnis:**
+   ```bash
+   cd /path/to/EspHomeVoipLib
+   ```
+
+3. **Bearbeiten Sie `example.yaml`:**
+   - Passen Sie WiFi-SSID/Passwort an.
+   - Setzen Sie die SIP-Server-IP, Benutzer und Passwort.
+   - Passen Sie I2S-Pins an Ihre Hardware an.
+
+4. **Bauen Sie die Firmware:**
+   ```bash
+   docker run --rm -v $(pwd):/config -it esphome/esphome run example.yaml
+   ```
+
+   Dies kompiliert die Firmware und zeigt eventuelle Fehler an. Wenn erfolgreich, wird eine `.bin`-Datei erstellt.
+
+5. **Für OTA-Updates (nach initialem Flash):**
+   ```bash
+   docker run --rm -v $(pwd):/config -it esphome/esphome run example.yaml --device OTA_IP
+   ```
+
+**Hinweis:** Ersetzen Sie `OTA_IP` durch die IP-Adresse Ihres ESP32 nach dem ersten Flash.
 
 ## Hinweise
 
-- **Abhängigkeiten**: Befolgen Sie die ESPHome-Guidelines – externe Libs werden nicht automatisch geladen. Verwenden Sie die bereitgestellte `platformio.ini` oder fügen Sie `lib_deps` manuell hinzu.
 - Testen Sie die Konfiguration in einer Entwicklungsumgebung.
 - Stellen Sie sicher, dass die I2S-Pins korrekt konfiguriert sind.
 - Für Opus und G.72x Codecs müssen die entsprechenden Bibliotheken kompiliert werden.
-- Bei Problemen prüfen Sie die ESPHome-Logs und stellen Sie sicher, dass Ihre ESPHome-Version aktuell ist.
