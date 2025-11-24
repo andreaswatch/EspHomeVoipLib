@@ -1,6 +1,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import i2s_audio
+from esphome.components.i2s_audio.microphone import I2SAudioMicrophone
+from esphome.components.i2s_audio.speaker import I2SAudioSpeaker
 from esphome.const import CONF_ID
 
 DEPENDENCIES = []
@@ -17,8 +18,8 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional('codec', default=0): cv.int_,
     cv.Optional('mic_gain', default=2): cv.int_,
     cv.Optional('amp_gain', default=6): cv.int_,
-    cv.Required('mic_id'): cv.use_id(i2s_audio.I2SAudioMicrophone),
-    cv.Required('speaker_id'): cv.use_id(i2s_audio.I2SAudioSpeaker),
+    cv.Required('mic_id'): cv.use_id(I2SAudioMicrophone),
+    cv.Required('speaker_id'): cv.use_id(I2SAudioSpeaker),
 }).extend(cv.COMPONENT_SCHEMA)
 
 def to_code(config):
