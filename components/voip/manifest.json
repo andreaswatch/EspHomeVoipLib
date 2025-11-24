@@ -2,5 +2,6 @@
   "name": "voip",
   "version": "1.0.0",
   "description": "VoIP component with audio streaming for ESPHome",
-  "dependencies": ["i2s_audio"]
+  "dependencies": [],
+  "sources": ["g711.cpp"]
 }

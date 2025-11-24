@@ -62,7 +62,6 @@ voip:
 
 ## Abhängigkeiten
 
-- `i2s_audio` (für VoIP-Komponente)
 - Zusätzliche Bibliotheken für Codecs:
   - Opus (für Codec 2): Muss in der ESPHome-Umgebung verfügbar sein
   - G.72x (für Codec 3): Muss in der ESPHome-Umgebung verfügbar sein
@@ -77,7 +76,8 @@ Hier ist eine vollständige Beispiel-Konfiguration, die alle erforderlichen Abh�
 ```yaml
 esphome:
   name: voip-device
-  platform: ESP32
+
+esp32:
   board: esp32dev
   framework:
     type: arduino
@@ -156,6 +156,36 @@ button:
 logger:
   level: DEBUG
 ```
+
+## Testen mit ESPHome in Docker
+
+Um die Komponente zu testen, ohne ESPHome global zu installieren, verwenden Sie Docker:
+
+1. **Stellen Sie sicher, dass Docker installiert ist.**
+
+2. **Navigieren Sie zum Projektverzeichnis:**
+   ```bash
+   cd /path/to/EspHomeVoipLib
+   ```
+
+3. **Bearbeiten Sie `example.yaml`:**
+   - Passen Sie WiFi-SSID/Passwort an.
+   - Setzen Sie die SIP-Server-IP, Benutzer und Passwort.
+   - Passen Sie I2S-Pins an Ihre Hardware an.
+
+4. **Bauen Sie die Firmware:**
+   ```bash
+   docker run --rm -v $(pwd):/config -it esphome/esphome run example.yaml
+   ```
+
+   Dies kompiliert die Firmware und zeigt eventuelle Fehler an. Wenn erfolgreich, wird eine `.bin`-Datei erstellt.
+
+5. **Für OTA-Updates (nach initialem Flash):**
+   ```bash
+   docker run --rm -v $(pwd):/config -it esphome/esphome run example.yaml --device OTA_IP
+   ```
+
+**Hinweis:** Ersetzen Sie `OTA_IP` durch die IP-Adresse Ihres ESP32 nach dem ersten Flash.
 
 ## Hinweise
 

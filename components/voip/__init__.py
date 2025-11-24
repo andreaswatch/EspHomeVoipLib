@@ -1,10 +1,9 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import i2s_audio
 from esphome.const import CONF_ID
 
-DEPENDENCIES = ['i2s_audio']
-AUTO_LOAD = ['sip']
+DEPENDENCIES = []
+AUTO_LOAD = []
 
 voip_ns = cg.esphome_ns.namespace('voip')
 Voip = voip_ns.class_('Voip', cg.Component)
@@ -14,7 +13,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Required('sip_ip'): cv.string,
     cv.Required('sip_user'): cv.string,
     cv.Required('sip_pass'): cv.string,
-    cv.Optional('codec', default=1): cv.int_,
+    cv.Optional('codec', default=0): cv.int_,
     cv.Optional('mic_gain', default=2): cv.int_,
     cv.Optional('amp_gain', default=6): cv.int_,
     cv.Optional('mic_bck_pin', default=26): cv.int_,
