@@ -108,6 +108,7 @@ class Voip : public Component {
   void set_speaker(i2s_audio::I2SAudioSpeaker *speaker) { speaker_ = speaker; }
   void set_ready_sensor(esphome::binary_sensor::BinarySensor *sensor) { ready_sensor_ = sensor; }
   void set_default_dial_number(const std::string &num) { default_dial_number_ = num; }
+  void set_start_on_boot(bool v) { start_on_boot_ = v; }
   const std::string &get_default_dial_number() const { return default_dial_number_; }
   void start() { if (!default_dial_number_.empty()) dial(default_dial_number_, "Start"); }
 
@@ -116,7 +117,7 @@ class Voip : public Component {
   esphome::binary_sensor::BinarySensor *ready_sensor_ = nullptr;
 
  protected:
-  Sip *sip_;
+  Sip *sip_ = nullptr;
   ::std::unique_ptr<socket::Socket> rtp_udp_;
   char rtpPacketBuffer[1024];
   bool tx_stream_is_running_ = false;
@@ -135,6 +136,7 @@ class Voip : public Component {
   std::vector<uint8_t> mic_buffer_;
   std::string default_dial_number_ = "";
   bool started_ = false;
+  bool start_on_boot_ = false;
   void mic_data_callback(const std::vector<uint8_t> &data);
   void handle_incoming_rtp();
   void handle_outgoing_rtp();

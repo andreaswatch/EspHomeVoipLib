@@ -35,6 +35,8 @@ Sip::Sip() : p_buf_(nullptr), l_buf_(2048), i_last_cseq_(0), codec_(0) {
   audioport = "";
 }
 
+// Destructor will be implemented later
+
 void Sip::init(const std::string &sip_ip, int sip_port, const std::string &my_ip, int my_port, const std::string &sip_user, const std::string &sip_pass) {
   p_sip_ip_ = sip_ip;
   i_sip_port_ = sip_port;
@@ -49,16 +51,22 @@ void Sip::init(const std::string &sip_ip, int sip_port, const std::string &my_ip
   i_last_cseq_ = 0;
   codec_ = 0;
   // create SIP socket
-  this->udp_ = socket::socket(AF_INET, SOCK_DGRAM, 0);
+    this->udp_ = socket::socket(AF_INET, SOCK_DGRAM, 0);
+    ESP_LOGI(TAG, "Sip::init: creating UDP socket for SIP");
   if (this->udp_ != nullptr) {
     this->udp_->setblocking(false);
     struct sockaddr_in local = {};
     local.sin_family = AF_INET;
     local.sin_port = htons(this->i_my_port_);
     local.sin_addr.s_addr = INADDR_ANY;
-    this->udp_->bind((struct sockaddr *)&local, sizeof(local));
+      if (this->udp_->bind((struct sockaddr *)&local, sizeof(local)) != 0) {
+        ESP_LOGW(TAG, "Sip::init: bind failed for SIP port %d", this->i_my_port_);
+      } else {
+        ESP_LOGI(TAG, "Sip::init: bound SIP socket to port %d", this->i_my_port_);
+      }
   } else {
     ESP_LOGW(TAG, "Sip::init: Failed to create UDP socket for SIP");
+    // Notify but don't crash
   }
 }
 
@@ -77,6 +85,7 @@ void Sip::dump_config() {
 }
 
 Sip::~Sip() {
+  ESP_LOGI(TAG, "Sip destructor called");
   if (p_buf_) {
     delete[] p_buf_;
     p_buf_ = nullptr;
@@ -380,8 +389,13 @@ void Sip::handle_udp_packet() {
     // max 5 dial retry when loos first invite packet
     if (i_auth_cnt_ == 0 && i_dial_retries_ < 5 && i_ring_time_ && (millis() - i_ring_time_) > (i_dial_retries_ * 200)) {
       i_dial_retries_++;
-      delay(30);
-      invite();
+      ESP_LOGD(TAG, "Scheduling INVITE retry #%d", i_dial_retries_);
+      // avoid double scheduling
+      App.scheduler.cancel_timeout(this, "sip_invite_retry");
+      App.scheduler.set_timeout(this, "sip_invite_retry", 30, [this]() {
+        ESP_LOGD(TAG, "Running scheduled INVITE retry");
+        this->invite();
+      });
     }
     return;
   }
@@ -713,25 +727,41 @@ Voip::~Voip() {
 }
 
 void Voip::setup() {
-  ESP_LOGI(TAG, "VoIP minimal setup called");
+  ESP_LOGI(TAG, "VoIP setup called");
   started_ = false;
   // report hardware readiness (mic + speaker available) to the binary sensor
   if (this->ready_sensor_) {
     bool hw_ready = (this->microphone_ != nullptr) && (this->speaker_ != nullptr);
     this->ready_sensor_->publish_state(hw_ready);
+    ESP_LOGI(TAG, "VoIP ready sensor published: %d", hw_ready);
+  }
+  ESP_LOGI(TAG, "VoIP setup finished: mic=%p speaker=%p ready_sensor=%p", microphone_, speaker_, ready_sensor_);
+  // If configured, attempt to start VoIP automatically when hardware is ready
+  if (start_on_boot_) {
+    bool hw_ready = (this->microphone_ != nullptr) && (this->speaker_ != nullptr);
+    if (hw_ready && !started_) {
+      ESP_LOGI(TAG, "start_on_boot enabled and hardware ready, starting VoIP component");
+      this->start_component();
+    } else if (!hw_ready) {
+      ESP_LOGI(TAG, "start_on_boot enabled but hardware not ready, will not start yet");
+    }
   }
 }
 
 void Voip::loop() {
-  // Maintain readiness state
+  // Maintain readiness state (hardware ready = microphone + speaker available)
   if (this->ready_sensor_) {
-    bool ready = (this->rtp_udp_ != nullptr) && (this->sip_ != nullptr) && (this->microphone_ != nullptr) && (this->speaker_ != nullptr);
-    this->ready_sensor_->publish_state(ready);
+    bool hw_ready = (this->microphone_ != nullptr) && (this->speaker_ != nullptr);
+    this->ready_sensor_->publish_state(hw_ready);
   }
   // if (network::is_connected()) {
-    handle_incoming_rtp();
-    handle_outgoing_rtp();
-    sip_->loop();
+    if (this->rtp_udp_) {
+      handle_incoming_rtp();
+    }
+    if (sip_) {
+      handle_outgoing_rtp();
+      sip_->loop();
+    }
   // }
 }
 
@@ -798,7 +828,9 @@ void Voip::start_component() {
     ESP_LOGE(TAG, "Failed to allocate Sip instance");
     return;
   }
+  ESP_LOGI(TAG, "Initializing SIP subcomponent: server=%s port=%d user=%s", sip_ip_.c_str(), sip_port_, sip_user_.c_str());
   sip_->init(sip_ip_, sip_port_, "192.168.1.100", sip_port_, sip_user_, sip_pass_);
+  ESP_LOGI(TAG, "Sip initialized: %p", sip_);
   if (microphone_) {
     microphone_->add_data_callback([this](const std::vector<uint8_t> &data) { this->mic_data_callback(data); });
   }
@@ -903,13 +935,29 @@ void Voip::tx_rtp() {
     }
     // PCMU
     uint8_t temp[160];
-    if (mic_buffer_.size() >= 640) {
+    int bytes_per_sample = 4;
+    size_t required = 640; // 160 samples * 4 bytes
+    if (mic_buffer_.size() < required) {
+      // maybe 16-bit samples => 2 bytes per sample (160 * 2 = 320 bytes)
+      if (mic_buffer_.size() >= 320) {
+        bytes_per_sample = 2;
+        required = 320;
+      }
+    }
+    if (mic_buffer_.size() >= required) {
       for (int i = 0; i < 160; i++) {
-        SAMPLE_T sample;
-        memcpy(&sample, &mic_buffer_[i * 4], sizeof(sample));
+        SAMPLE_T sample = 0;
+        if (bytes_per_sample == 4) {
+          memcpy(&sample, &mic_buffer_[i * 4], sizeof(sample));
+        } else {
+          int16_t s16 = 0;
+          memcpy(&s16, &mic_buffer_[i * 2], sizeof(s16));
+          // scale 16-bit to SAMPLE_T (24-bit internal representation)
+          sample = ((SAMPLE_T)s16) << (SAMPLE_BITS - 16);
+        }
         temp[i] = linear2ulaw(MIC_CONVERT(sample) * mic_gain_);
       }
-      mic_buffer_.erase(mic_buffer_.begin(), mic_buffer_.begin() + 640);
+      mic_buffer_.erase(mic_buffer_.begin(), mic_buffer_.begin() + required);
     } else {
       return; // not enough data
     }
@@ -952,13 +1000,27 @@ void Voip::tx_rtp() {
     if (!started_) return; // ensure started
     // PCMA
     uint8_t temp[160];
-    if (mic_buffer_.size() >= 640) {
+    int bytes_per_sample = 4;
+    size_t required = 640; // 160 samples * 4 bytes
+    if (mic_buffer_.size() < required) {
+      if (mic_buffer_.size() >= 320) {
+        bytes_per_sample = 2;
+        required = 320;
+      }
+    }
+    if (mic_buffer_.size() >= required) {
       for (int i = 0; i < 160; i++) {
-        SAMPLE_T sample;
-        memcpy(&sample, &mic_buffer_[i * 4], sizeof(sample));
+        SAMPLE_T sample = 0;
+        if (bytes_per_sample == 4) {
+          memcpy(&sample, &mic_buffer_[i * 4], sizeof(sample));
+        } else {
+          int16_t s16 = 0;
+          memcpy(&s16, &mic_buffer_[i * 2], sizeof(s16));
+          sample = ((SAMPLE_T)s16) << (SAMPLE_BITS - 16);
+        }
         temp[i] = linear2alaw(MIC_CONVERT(sample) * mic_gain_);
       }
-      mic_buffer_.erase(mic_buffer_.begin(), mic_buffer_.begin() + 640);
+      mic_buffer_.erase(mic_buffer_.begin(), mic_buffer_.begin() + required);
     } else {
       return; // not enough data
     }

@@ -23,6 +23,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Required('speaker_id'): cv.use_id(I2SAudioSpeaker),
     cv.Optional('ready_sensor_id'): cv.use_id(BinarySensor),
     cv.Optional('default_dial_number'): cv.string,
+    cv.Optional('start_on_boot', default=False): cv.boolean,
 }).extend(cv.COMPONENT_SCHEMA)
 
 def to_code(config):
@@ -40,4 +41,6 @@ def to_code(config):
         cg.add(var.set_ready_sensor(ready))
     if 'default_dial_number' in config:
         cg.add(var.set_default_dial_number(config['default_dial_number']))
+    if 'start_on_boot' in config and config['start_on_boot']:
+        cg.add(var.set_start_on_boot(True))
     yield cg.register_component(var, config)
