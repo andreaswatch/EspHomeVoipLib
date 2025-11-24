@@ -745,10 +745,20 @@ void Voip::setup() {
     ESP_LOGE(TAG, "Speaker not found");
     return;
   }
+  // Prepare readiness sensor: set to true if RTP, SIP, mic and speaker are available
+  if (this->ready_sensor_) {
+    bool ready = (this->rtp_udp_ != nullptr) && (this->sip_ != nullptr) && (this->microphone_ != nullptr) && (this->speaker_ != nullptr);
+    this->ready_sensor_->publish_state(ready);
+  }
   microphone_->add_data_callback([this](const std::vector<uint8_t> &data) { this->mic_data_callback(data); });
 }
 
 void Voip::loop() {
+  // Maintain readiness state
+  if (this->ready_sensor_) {
+    bool ready = (this->rtp_udp_ != nullptr) && (this->sip_ != nullptr) && (this->microphone_ != nullptr) && (this->speaker_ != nullptr);
+    this->ready_sensor_->publish_state(ready);
+  }
   // if (network::is_connected()) {
     handle_incoming_rtp();
     handle_outgoing_rtp();

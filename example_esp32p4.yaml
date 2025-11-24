@@ -72,6 +72,9 @@ voip:
   amp_gain: 6
   mic_id: board_microphone
   speaker_id: board_speaker
+  # Optional: Provide a binary sensor for readiness and a default number for start
+  ready_sensor_id: voip_ready
+  default_dial_number: "123"
 
 # Beispiel-Buttons zum Testen
 button:
@@ -85,6 +88,28 @@ button:
     on_press:
       - lambda: id(my_voip).hangup();
 
+switch:
+  - platform: template
+    name: "Start VoIP"
+    id: start_voip_switch
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action:
+      - if:
+          condition:
+            binary_sensor.is_on: voip_ready
+          then:
+            - lambda: id(my_voip).start();
+          else:
+            - logger.log: "VOIP-Switch pressed, but VoIP is not ready"
+    turn_off_action:
+      - lambda: id(my_voip).hangup();
+
 # Logger für Debugging
 logger:
   level: DEBUG
+
+binary_sensor:
+  - platform: template
+    name: "VoIP Ready"
+    id: voip_ready

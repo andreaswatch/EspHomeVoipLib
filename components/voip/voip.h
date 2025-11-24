@@ -12,6 +12,7 @@
 #include "esphome/components/i2s_audio/speaker/i2s_audio_speaker.h"
 #include "esphome/core/scheduler.h"
 #include <chrono>
+#include "esphome/components/binary_sensor/binary_sensor.h"
 
 namespace esphome {
 namespace voip {
@@ -103,9 +104,14 @@ class Voip : public Component {
   void set_amp_gain(int gain) { amp_gain_ = gain; }
   void set_mic(i2s_audio::I2SAudioMicrophone *mic) { microphone_ = mic; }
   void set_speaker(i2s_audio::I2SAudioSpeaker *speaker) { speaker_ = speaker; }
+  void set_ready_sensor(esphome::binary_sensor::BinarySensor *sensor) { ready_sensor_ = sensor; }
+  void set_default_dial_number(const std::string &num) { default_dial_number_ = num; }
+  const std::string &get_default_dial_number() const { return default_dial_number_; }
+  void start() { if (!default_dial_number_.empty()) dial(default_dial_number_, "Start"); }
 
   i2s_audio::I2SAudioMicrophone *microphone_ = nullptr;
   i2s_audio::I2SAudioSpeaker *speaker_ = nullptr;
+  esphome::binary_sensor::BinarySensor *ready_sensor_ = nullptr;
 
  protected:
   Sip *sip_;
@@ -125,6 +131,7 @@ class Voip : public Component {
   std::string sip_user_;
   std::string sip_pass_;
   std::vector<uint8_t> mic_buffer_;
+  std::string default_dial_number_ = "";
   void mic_data_callback(const std::vector<uint8_t> &data);
   void handle_incoming_rtp();
   void handle_outgoing_rtp();
