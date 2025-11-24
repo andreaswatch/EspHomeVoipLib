@@ -2,7 +2,7 @@
 #define ESPHOME_VOIP_H
 
 #include "esphome.h"
-#include <driver/i2s.h>
+#include <driver/i2s_std.h>
 #include "g711.h"
 
 namespace esphome {

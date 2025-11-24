@@ -1,8 +1,8 @@
 #include "voip.h"
-#include <MD5Builder.h>
 #include <cstring>
 #include <cstdarg>
 #include <Arduino.h>
+#include "mbedtls/md5.h"
 
 namespace esphome {
 namespace voip {
@@ -399,11 +399,22 @@ uint32_t Sip::millis() {
 }
 
 void Sip::make_md5_digest(char *p_out_hex33, char *p_in) {
-  MD5Builder a_md5;
-  a_md5.begin();
-  a_md5.add(p_in);
-  a_md5.calculate();
-  a_md5.getChars(p_out_hex33);
+  mbedtls_md5_context ctx;
+  unsigned char output[16];
+  char hex[3];
+
+  mbedtls_md5_init(&ctx);
+  mbedtls_md5_starts(&ctx);
+  mbedtls_md5_update(&ctx, (const unsigned char *)p_in, strlen(p_in));
+  mbedtls_md5_finish(&ctx, output);
+  mbedtls_md5_free(&ctx);
+
+  for (int i = 0; i < 16; i++) {
+    sprintf(hex, "%02x", output[i]);
+    p_out_hex33[i * 2] = hex[0];
+    p_out_hex33[i * 2 + 1] = hex[1];
+  }
+  p_out_hex33[32] = '\0';
 }
 
 void Sip::hangup() {
