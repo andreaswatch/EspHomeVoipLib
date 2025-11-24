@@ -1,6 +1,7 @@
 {
     "files.associations": {
         "*.yaml": "yaml",
-        "random": "cpp"
+        "random": "cpp",
+        "new": "cpp"
     }
 }

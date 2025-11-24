@@ -8,6 +8,16 @@
 #include "mbedtls/md.h"
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <algorithm>
+#include <new>
+
+// Safety helpers
+static inline void safe_strncpy(char *dest, const char *src, size_t destSize) {
+  if (!dest || !src || destSize == 0) return;
+  strncpy(dest, src, destSize - 1);
+  dest[destSize - 1] = '\0';
+}
+static inline size_t safe_strlen(const char *s) { return s ? strlen(s) : 0; }
 
 namespace esphome {
 namespace voip {
@@ -15,10 +25,22 @@ namespace voip {
 static const char *const TAG = "voip";
 
 Sip::Sip() : p_buf_(nullptr), l_buf_(2048), i_last_cseq_(0), codec_(0) {
-  p_buf_ = new char[l_buf_];
+  p_buf_ = new (std::nothrow) char[l_buf_];
+  if (p_buf_ == nullptr) {
+    ESP_LOGE(TAG, "Sip: Failed to allocate p_buf_");
+    l_buf_ = 0;
+  }
   p_dial_nr_ = "";
   p_dial_desc_ = "";
   audioport = "";
+}
+
+Sip::~Sip() {
+  if (p_buf_) {
+    delete[] p_buf_;
+    p_buf_ = nullptr;
+    l_buf_ = 0;
+  }
 }
 
 void Sip::setup() {
@@ -51,7 +73,7 @@ void Sip::init(const std::string &sip_ip, int sip_port, const std::string &my_ip
     return;
   }
   memset(ca_read_, 0, sizeof(ca_read_));
-  memset(p_buf_, 0, l_buf_);
+  if (p_buf_ && l_buf_) memset(p_buf_, 0, l_buf_);
   p_sip_ip_ = sip_ip;
   i_sip_port_ = sip_port;
   p_sip_user_ = sip_user;
@@ -80,7 +102,7 @@ bool Sip::dial(const std::string &dial_nr, const std::string &dial_desc) {
 void Sip::cancel(int cseq) {
   if (ca_read_[0] == 0)
     return;
-  memset(p_buf_, 0, l_buf_);
+  if (p_buf_ && l_buf_) memset(p_buf_, 0, l_buf_);
   add_sip_line("%s sip:%s@%s SIP/2.0", "CANCEL", p_dial_nr_.c_str(), p_sip_ip_.c_str());
   add_sip_line("%s", ca_read_);
   add_sip_line("CSeq: %i %s", cseq, "CANCEL");
@@ -95,7 +117,7 @@ void Sip::bye(int cseq) {
   audioport = "";
   if (ca_read_[0] == 0)
     return;
-  memset(p_buf_, 0, l_buf_);
+  if (p_buf_ && l_buf_) memset(p_buf_, 0, l_buf_);
   add_sip_line("%s sip:%s@%s SIP/2.0", "BYE", p_dial_nr_.c_str(), p_sip_ip_.c_str());
   add_sip_line("%s", ca_read_);
   add_sip_line("CSeq: %i %s", cseq, "BYE");
@@ -112,7 +134,7 @@ void Sip::ack(const char *p_in) {
   if (!b)
     return;
 
-  memset(p_buf_, 0, l_buf_);
+  if (p_buf_ && l_buf_) memset(p_buf_, 0, l_buf_);
   add_sip_line("ACK %s SIP/2.0", ca.c_str());
   add_copy_sip_line(p_in, "Call-ID: ");
   int cseq = grep_integer(p_in, "\nCSeq: ");
@@ -126,7 +148,7 @@ void Sip::ack(const char *p_in) {
 }
 
 void Sip::ok(const char *p) {
-  memset(p_buf_, 0, l_buf_);
+  if (p_buf_ && l_buf_) memset(p_buf_, 0, l_buf_);
   add_sip_line("SIP/2.0 200 OK");
   add_copy_sip_line(p, "Call-ID: ");
   add_copy_sip_line(p, "CSeq: ");
@@ -161,12 +183,18 @@ void Sip::invite(const char *p) {
     std::string realm, nonce;
     if (parse_parameter(realm, " realm=\"", p) &&
         parse_parameter(nonce, " nonce=\"", p)) {
+      if (!p_buf_ || l_buf_ < 132) {
+        ESP_LOGE(TAG, "Insufficient buffer for md5 digest building");
+        ca_read_[0] = 0;
+        return;
+      }
       // using output buffer to build the md5 hashes
       // store the md5 haResp to end of buffer
       char *ha1_hex = p_buf_;
       char *ha2_hex = p_buf_ + 33;
       ha_resp = p_buf_ + l_buf_ - 34;
       char *p_temp = p_buf_ + 66;
+      ESP_LOGD(TAG, "MD5 buffers: ha1_hex=%p ha2_hex=%p ha_resp=%p p_temp=%p l_buf=%u", ha1_hex, ha2_hex, ha_resp, p_temp, (unsigned)l_buf_);
 
       snprintf(p_temp, l_buf_ - 100, "%s:%s:%s", p_sip_user_.c_str(), realm.c_str(), p_sip_pass_.c_str());
       make_md5_digest(ha1_hex, p_temp);
@@ -181,7 +209,7 @@ void Sip::invite(const char *p) {
       return;
     }
   }
-  memset(p_buf_, 0, l_buf_);
+  if (p_buf_ && l_buf_) memset(p_buf_, 0, l_buf_);
   add_sip_line("INVITE sip:%s@%s SIP/2.0", p_dial_nr_.c_str(), p_sip_ip_.c_str());
   add_sip_line("Call-ID: %010u@%s", callid_, p_my_ip_.c_str());
   add_sip_line("CSeq: %i INVITE", cseq);
@@ -221,25 +249,43 @@ void Sip::invite(const char *p) {
 }
 
 void Sip::add_sip_line(const char *const_format, ...) {
+  if (!p_buf_ || l_buf_ == 0) {
+    ESP_LOGW(TAG, "add_sip_line called with invalid buffer");
+    return;
+  }
   va_list arglist;
   va_start(arglist, const_format);
-  uint16_t l = (uint16_t)strlen(p_buf_);
+  uint16_t l = (uint16_t)safe_strlen(p_buf_);
   char *p = p_buf_ + l;
-  int written = vsnprintf(p, l_buf_ - l, const_format, arglist);
+  if (l >= l_buf_) {
+    // no space
+    va_end(arglist);
+    ESP_LOGW(TAG, "Buffer full, dropping line: %s", const_format);
+    return;
+  }
+  size_t remain = l_buf_ - l;
+  int written = vsnprintf(p, remain, const_format, arglist);
   va_end(arglist);
   // Recompute effective length after append. If truncated, we still compute current length.
-  l = (uint16_t)strlen(p_buf_);
+  l = (uint16_t)safe_strlen(p_buf_);
   // Add CRLF only if there is at least room for CRLF and null terminator.
   if (l <= (l_buf_ - 3)) {
     p_buf_[l] = '\r';
     p_buf_[l + 1] = '\n';
     p_buf_[l + 2] = 0;
   }
+  if (written < 0) {
+    ESP_LOGW(TAG, "vsnprintf failed or truncated output");
+  } else if ((size_t)written >= remain) {
+    // truncated
+    ESP_LOGW(TAG, "Line truncated by vsnprintf (len=%d, remain=%u)", written, (unsigned)remain);
+  }
 }
 
 bool Sip::parse_parameter(std::string &dest, const char *name, const char *line, char cq) {
   const char *qp;
   const char *r;
+  if (!line || !name) return false;
   if ((r = strstr(line, name)) != NULL) {
     r = r + strlen(name);
     qp = strchr(r, cq);
@@ -255,12 +301,14 @@ bool Sip::parse_parameter(std::string &dest, const char *name, const char *line,
 }
 
 bool Sip::add_copy_sip_line(const char *p, const char *psearch) {
+  if (!p || !psearch || !p_buf_)
+    return false;
   char *pa = strstr((char *)p, psearch);
   if (pa) {
     char *pe = strstr(pa, "\r");
     if (pe == 0)
       pe = strstr(pa, "\n");
-    if (pe > pa) {
+    if (pe && pe > pa) {
       char c = *pe;
       *pe = 0;
       add_sip_line("%s", pa);
@@ -273,6 +321,7 @@ bool Sip::add_copy_sip_line(const char *p, const char *psearch) {
 
 int Sip::grep_integer(const char *p, const char *psearch) {
   int param = -1;
+  if (!p || !psearch) return -1;
   const char *pc = strstr(p, psearch);
   if (pc) {
     param = atoi(pc + strlen(psearch));
@@ -281,12 +330,12 @@ int Sip::grep_integer(const char *p, const char *psearch) {
 }
 
 bool Sip::parse_return_params(const char *p) {
-  memset(p_buf_, 0, l_buf_);
+  if (p_buf_ && l_buf_) memset(p_buf_, 0, l_buf_);
   add_copy_sip_line(p, "Call-ID: ");
   add_copy_sip_line(p, "From: ");
   add_copy_sip_line(p, "Via: ");
   add_copy_sip_line(p, "To: ");
-  if (strlen(p_buf_) >= 2) {
+  if (p_buf_ && safe_strlen(p_buf_) >= 2) {
     // copy safely to ca_read_ which has fixed small size
     strncpy(ca_read_, p_buf_, sizeof(ca_read_) - 1);
     ca_read_[sizeof(ca_read_) - 1] = '\0';
@@ -294,6 +343,9 @@ bool Sip::parse_return_params(const char *p) {
     if (slen >= 2) {
       ca_read_[slen - 2] = 0;  // remove trailing CRLF if present
     }
+      if (safe_strlen(p_buf_) >= sizeof(ca_read_)) {
+        ESP_LOGW(TAG, "parse_return_params: p_buf_ content truncated copying to ca_read_");
+      }
   }
   return true;
 }
@@ -309,7 +361,13 @@ void Sip::handle_udp_packet() {
     char ip_str[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &remote.sin_addr, ip_str, sizeof(ip_str));
     ESP_LOGD(TAG, "Received SIP packet from %s:%d size %d", ip_str, ntohs(remote.sin_port), packet_size);
-    ca_sip_in[packet_size] = 0;
+    if (packet_size >= (int)sizeof(ca_sip_in)) {
+      // truncated packet, ensure last char zero
+      ca_sip_in[sizeof(ca_sip_in) - 1] = 0;
+      ESP_LOGW(TAG, "SIP packet truncated to %u bytes", (unsigned)sizeof(ca_sip_in));
+    } else {
+      ca_sip_in[packet_size] = 0;
+    }
     ESP_LOGD(TAG, "Response status: %s", strstr(ca_sip_in, "SIP/2.0") ? strstr(ca_sip_in, "SIP/2.0") : "No SIP/2.0");
   }
   if (packet_size > 0) {
@@ -416,12 +474,21 @@ void Sip::handle_udp_packet() {
 }
 
 int Sip::send_udp() {
+  if (!p_buf_) {
+    ESP_LOGE(TAG, "send_udp: p_buf_ == nullptr");
+    return -1;
+  }
   ESP_LOGD(TAG, "Sending SIP packet to %s:%d", p_sip_ip_.c_str(), i_sip_port_);
   struct sockaddr_in remote = {};
   remote.sin_family = AF_INET;
   remote.sin_port = htons(i_sip_port_);
   inet_pton(AF_INET, p_sip_ip_.c_str(), &remote.sin_addr);
-  this->udp_->sendto((uint8_t *)p_buf_, strlen(p_buf_), 0, (struct sockaddr *)&remote, sizeof(remote));
+  if (!this->udp_) {
+    ESP_LOGE(TAG, "send_udp: udp socket is null");
+    return -1;
+  }
+  size_t len = safe_strlen(p_buf_);
+  this->udp_->sendto((uint8_t *)p_buf_, len, 0, (struct sockaddr *)&remote, sizeof(remote));
   return 0;
 }
 
@@ -434,17 +501,21 @@ uint32_t Sip::millis() {
 }
 
 void Sip::make_md5_digest(char *p_out_hex33, char *p_in) {
+  if (!p_out_hex33 || !p_in) return;
   unsigned char output[16];
   const mbedtls_md_info_t *md_info = mbedtls_md_info_from_type(MBEDTLS_MD_MD5);
   if (md_info == nullptr) {
     // fallback: zero out output
     memset(output, 0, sizeof(output));
   } else {
-    mbedtls_md(md_info, (const unsigned char *)p_in, strlen(p_in), output);
+    size_t in_len = safe_strlen(p_in);
+    mbedtls_md(md_info, (const unsigned char *)p_in, in_len, output);
   }
   for (int i = 0; i < 16; i++) {
-    sprintf(&p_out_hex33[i * 2], "%02x", output[i]);
+    // write exactly two chars and null-terminate next position for safety
+    snprintf(&p_out_hex33[i * 2], 3, "%02x", output[i]);
   }
+  // ensure full buffer is null terminated (32 chars + 1)
   p_out_hex33[32] = '\0';
 }
 
@@ -658,7 +729,11 @@ void Voip::setup() {
     return;
   }
   ESP_LOGI(TAG, "RTP listen on port 1234");
-  sip_ = new Sip();
+  sip_ = new (std::nothrow) Sip();
+  if (!sip_) {
+    ESP_LOGE(TAG, "Failed to allocate Sip instance");
+    return;
+  }
   sip_->init(sip_ip_, sip_port_, "192.168.1.100", sip_port_, sip_user_, sip_pass_);
 
   // microphone_ and speaker_ are set by set_mic and set_speaker
@@ -720,9 +795,19 @@ void Voip::handle_incoming_rtp() {
     struct sockaddr_in remote;
     socklen_t addrlen = sizeof(remote);
     packet_size_ = this->rtp_udp_->recvfrom(rtp_buffer_, sizeof(rtp_buffer_), (struct sockaddr *)&remote, &addrlen);
+    if (packet_size_ <= 0) return;
+    if ((size_t)packet_size_ > sizeof(rtp_buffer_)) {
+      ESP_LOGW(TAG, "RTP packet too large: %d, truncating to %u", packet_size_, (unsigned)sizeof(rtp_buffer_));
+      packet_size_ = sizeof(rtp_buffer_);
+    }
     if (packet_size_ > 0 && rx_stream_is_running_) {
+        if (!speaker_) {
+          ESP_LOGW(TAG, "Received RTP but speaker_ is null");
+          return;
+        }
       uint8_t *payload = rtp_buffer_ + 12; // Skip RTP header
       rtppkg_size_ = packet_size_ - 12;
+      if (rtppkg_size_ > 500) rtppkg_size_ = 500; // clamp to buffer size
       for (int i = 0; i < rtppkg_size_; i++) {
         buffer[i] = ulaw2linear(payload[i]) * amp_gain_;
       }
@@ -734,9 +819,15 @@ void Voip::handle_incoming_rtp() {
     struct sockaddr_in remote;
     socklen_t addrlen = sizeof(remote);
     packet_size_ = this->rtp_udp_->recvfrom(rtp_buffer_, sizeof(rtp_buffer_), (struct sockaddr *)&remote, &addrlen);
+    if (packet_size_ <= 0) return;
+    if ((size_t)packet_size_ > sizeof(rtp_buffer_)) {
+      ESP_LOGW(TAG, "RTP packet too large: %d, truncating to %u", packet_size_, (unsigned)sizeof(rtp_buffer_));
+      packet_size_ = sizeof(rtp_buffer_);
+    }
     if (packet_size_ > 0 && rx_stream_is_running_) {
       uint8_t *payload = rtp_buffer_ + 12;
       rtppkg_size_ = packet_size_ - 12;
+      if (rtppkg_size_ > 500) rtppkg_size_ = 500; // clamp to buffer size
       for (int i = 0; i < rtppkg_size_; i++) {
         buffer[i] = alaw2linear(payload[i]) * amp_gain_;
       }
@@ -768,11 +859,16 @@ void Voip::tx_rtp() {
   uint8_t packet_buffer[255];
 
   if (codec_type_ == 0) {
+    if (!microphone_) {
+      ESP_LOGW(TAG, "tx_rtp: microphone_ is null");
+      return;
+    }
     // PCMU
     uint8_t temp[160];
     if (mic_buffer_.size() >= 640) {
       for (int i = 0; i < 160; i++) {
-        SAMPLE_T sample = *(SAMPLE_T *)&mic_buffer_[i * 4];
+        SAMPLE_T sample;
+        memcpy(&sample, &mic_buffer_[i * 4], sizeof(sample));
         temp[i] = linear2ulaw(MIC_CONVERT(sample) * mic_gain_);
       }
       mic_buffer_.erase(mic_buffer_.begin(), mic_buffer_.begin() + 640);
@@ -782,13 +878,32 @@ void Voip::tx_rtp() {
     uint8_t *rtp_header = packet_buffer;
     rtp_header[0] = 0x80;
     rtp_header[1] = 0;
-    *(uint16_t *)(rtp_header + 2) = htons(sequence_number++);
-    *(uint32_t *)(rtp_header + 4) = htonl(timestamp += 160);
-    *(uint32_t *)(rtp_header + 8) = htonl(ssrc);
+    uint16_t seq_net = htons(sequence_number++);
+    rtp_header[2] = (seq_net >> 8) & 0xFF;
+    rtp_header[3] = seq_net & 0xFF;
+    uint32_t ts_net = htonl(timestamp += 160);
+    rtp_header[4] = (ts_net >> 24) & 0xFF;
+    rtp_header[5] = (ts_net >> 16) & 0xFF;
+    rtp_header[6] = (ts_net >> 8) & 0xFF;
+    rtp_header[7] = ts_net & 0xFF;
+    uint32_t ssrc_net = htonl(ssrc);
+    rtp_header[8] = (ssrc_net >> 24) & 0xFF;
+    rtp_header[9] = (ssrc_net >> 16) & 0xFF;
+    rtp_header[10] = (ssrc_net >> 8) & 0xFF;
+    rtp_header[11] = ssrc_net & 0xFF;
     memcpy(rtp_header + 12, temp, 160);
     struct sockaddr_in remote = {};
     remote.sin_family = AF_INET;
-    remote.sin_port = htons(atoi(sip_->audioport.c_str()));
+    int dest_port = atoi(sip_->audioport.c_str());
+    if (dest_port <= 0) {
+      ESP_LOGW(TAG, "Invalid audio port: %s", sip_->audioport.c_str());
+      return;
+    }
+    remote.sin_port = htons(dest_port);
+    if (sip_->get_sip_server_ip().empty()) {
+      ESP_LOGW(TAG, "tx_rtp: SIP server IP is empty!");
+      return;
+    }
     inet_pton(AF_INET, sip_->get_sip_server_ip().c_str(), &remote.sin_addr);
     this->rtp_udp_->sendto(packet_buffer, 12 + 160, 0, (struct sockaddr *)&remote, sizeof(remote));
   } else if (codec_type_ == 1) {
@@ -796,7 +911,8 @@ void Voip::tx_rtp() {
     uint8_t temp[160];
     if (mic_buffer_.size() >= 640) {
       for (int i = 0; i < 160; i++) {
-        SAMPLE_T sample = *(SAMPLE_T *)&mic_buffer_[i * 4];
+        SAMPLE_T sample;
+        memcpy(&sample, &mic_buffer_[i * 4], sizeof(sample));
         temp[i] = linear2alaw(MIC_CONVERT(sample) * mic_gain_);
       }
       mic_buffer_.erase(mic_buffer_.begin(), mic_buffer_.begin() + 640);
@@ -806,13 +922,32 @@ void Voip::tx_rtp() {
     uint8_t *rtp_header = packet_buffer;
     rtp_header[0] = 0x80;
     rtp_header[1] = 8;
-    *(uint16_t *)(rtp_header + 2) = htons(sequence_number++);
-    *(uint32_t *)(rtp_header + 4) = htonl(timestamp += 160);
-    *(uint32_t *)(rtp_header + 8) = htonl(ssrc);
+    uint16_t seq_net = htons(sequence_number++);
+    rtp_header[2] = (seq_net >> 8) & 0xFF;
+    rtp_header[3] = seq_net & 0xFF;
+    uint32_t ts_net = htonl(timestamp += 160);
+    rtp_header[4] = (ts_net >> 24) & 0xFF;
+    rtp_header[5] = (ts_net >> 16) & 0xFF;
+    rtp_header[6] = (ts_net >> 8) & 0xFF;
+    rtp_header[7] = ts_net & 0xFF;
+    uint32_t ssrc_net = htonl(ssrc);
+    rtp_header[8] = (ssrc_net >> 24) & 0xFF;
+    rtp_header[9] = (ssrc_net >> 16) & 0xFF;
+    rtp_header[10] = (ssrc_net >> 8) & 0xFF;
+    rtp_header[11] = ssrc_net & 0xFF;
     memcpy(rtp_header + 12, temp, 160);
     struct sockaddr_in remote = {};
     remote.sin_family = AF_INET;
-    remote.sin_port = htons(atoi(sip_->audioport.c_str()));
+    int dest_port = atoi(sip_->audioport.c_str());
+    if (dest_port <= 0) {
+      ESP_LOGW(TAG, "Invalid audio port: %s", sip_->audioport.c_str());
+      return;
+    }
+    remote.sin_port = htons(dest_port);
+    if (sip_->get_sip_server_ip().empty()) {
+      ESP_LOGW(TAG, "tx_rtp: SIP server IP is empty!");
+      return;
+    }
     inet_pton(AF_INET, sip_->get_sip_server_ip().c_str(), &remote.sin_addr);
     this->rtp_udp_->sendto(packet_buffer, 12 + 160, 0, (struct sockaddr *)&remote, sizeof(remote));
   }

@@ -19,6 +19,7 @@ namespace voip {
 class Sip : public Component {
  public:
   Sip();
+  ~Sip();
   void setup() override;
   void loop() override;
   void dump_config() override;
