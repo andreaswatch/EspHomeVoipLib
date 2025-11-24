@@ -43,47 +43,6 @@ Sip::~Sip() {
   }
 }
 
-void Sip::setup() {
-  // Initialization if needed
-}
-
-void Sip::loop() {
-  handle_udp_packet();
-}
-
-void Sip::dump_config() {
-  ESP_LOGCONFIG(TAG, "SIP Component");
-  ESP_LOGCONFIG(TAG, "  SIP Server: %s:%d", p_sip_ip_.c_str(), i_sip_port_);
-  ESP_LOGCONFIG(TAG, "  User: %s", p_sip_user_.c_str());
-}
-
-void Sip::init(const std::string &sip_ip, int sip_port, const std::string &my_ip, int my_port, const std::string &sip_user, const std::string &sip_pass) {
-  this->udp_ = socket::socket(AF_INET, SOCK_DGRAM, 0);
-  if (this->udp_ == nullptr) {
-    ESP_LOGE(TAG, "Failed to create SIP UDP socket");
-    return;
-  }
-  this->udp_->setblocking(false);
-  struct sockaddr_in addr = {};
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons(sip_port);
-  addr.sin_addr.s_addr = INADDR_ANY;
-  if (this->udp_->bind((struct sockaddr *)&addr, sizeof(addr)) != 0) {
-    ESP_LOGE(TAG, "Failed to bind SIP UDP socket");
-    return;
-  }
-  memset(ca_read_, 0, sizeof(ca_read_));
-  if (p_buf_ && l_buf_) memset(p_buf_, 0, l_buf_);
-  p_sip_ip_ = sip_ip;
-  i_sip_port_ = sip_port;
-  p_sip_user_ = sip_user;
-  p_sip_pass_ = sip_pass;
-  p_my_ip_ = my_ip;
-  i_my_port_ = my_port;
-  i_auth_cnt_ = 0;
-  i_ring_time_ = 0;
-}
-
 bool Sip::dial(const std::string &dial_nr, const std::string &dial_desc) {
   if (i_ring_time_)
     return false;
@@ -708,49 +667,18 @@ unsigned char ulaw2alaw(unsigned char uval)
 Voip::Voip() {}
 
 Voip::~Voip() {
-  // if (opus_encoder_) opus_encoder_destroy(opus_encoder_);
-  // if (opus_decoder_) opus_decoder_destroy(opus_decoder_);
+  // ensure we stop and free resources
+  stop_component();
 }
 
 void Voip::setup() {
-  // my_ip_ = network::get_ip_addresses().front().str();
-  this->rtp_udp_ = socket::socket(AF_INET, SOCK_DGRAM, 0);
-  if (this->rtp_udp_ == nullptr) {
-    ESP_LOGE(TAG, "Failed to create RTP UDP socket");
-    return;
-  }
-  this->rtp_udp_->setblocking(false);
-  struct sockaddr_in rtp_addr = {};
-  rtp_addr.sin_family = AF_INET;
-  rtp_addr.sin_port = htons(1234);
-  rtp_addr.sin_addr.s_addr = INADDR_ANY;
-  if (this->rtp_udp_->bind((struct sockaddr *)&rtp_addr, sizeof(rtp_addr)) != 0) {
-    ESP_LOGE(TAG, "Failed to bind RTP UDP socket");
-    return;
-  }
-  ESP_LOGI(TAG, "RTP listen on port 1234");
-  sip_ = new (std::nothrow) Sip();
-  if (!sip_) {
-    ESP_LOGE(TAG, "Failed to allocate Sip instance");
-    return;
-  }
-  sip_->init(sip_ip_, sip_port_, "192.168.1.100", sip_port_, sip_user_, sip_pass_);
-
-  // microphone_ and speaker_ are set by set_mic and set_speaker
-  if (microphone_ == nullptr) {
-    ESP_LOGE(TAG, "Microphone not found");
-    return;
-  }
-  if (speaker_ == nullptr) {
-    ESP_LOGE(TAG, "Speaker not found");
-    return;
-  }
-  // Prepare readiness sensor: set to true if RTP, SIP, mic and speaker are available
+  ESP_LOGI(TAG, "VoIP minimal setup called");
+  started_ = false;
+  // report hardware readiness (mic + speaker available) to the binary sensor
   if (this->ready_sensor_) {
-    bool ready = (this->rtp_udp_ != nullptr) && (this->sip_ != nullptr) && (this->microphone_ != nullptr) && (this->speaker_ != nullptr);
-    this->ready_sensor_->publish_state(ready);
+    bool hw_ready = (this->microphone_ != nullptr) && (this->speaker_ != nullptr);
+    this->ready_sensor_->publish_state(hw_ready);
   }
-  microphone_->add_data_callback([this](const std::vector<uint8_t> &data) { this->mic_data_callback(data); });
 }
 
 void Voip::loop() {
@@ -781,21 +709,79 @@ void Voip::init(const std::string &sip_ip, const std::string &sip_user, const st
 
 void Voip::dial(const std::string &number, const std::string &id) {
   ESP_LOGI(TAG, "Dialing %s", number.c_str());
+  if (!started_) {
+    ESP_LOGW(TAG, "dial called but VoIP not started");
+    return;
+  }
   rx_stream_is_running_ = true;
-  sip_->dial(number, id);
+  if (sip_) sip_->dial(number, id);
 }
 
 bool Voip::is_busy() {
-  return sip_->is_busy();
+  return sip_ ? sip_->is_busy() : false;
 }
 
 void Voip::hangup() {
-  sip_->hangup();
+  if (sip_) sip_->hangup();
 }
 
 void Voip::set_codec(int codec) {
   codec_type_ = codec;
-  sip_->set_codec(codec);
+  if (sip_) sip_->set_codec(codec);
+}
+
+void Voip::start_component() {
+  if (started_) {
+    ESP_LOGW(TAG, "VoIP already started");
+    return;
+  }
+  ESP_LOGI(TAG, "Starting VoIP component...");
+  // create RTP socket and SIP component
+  this->rtp_udp_ = socket::socket(AF_INET, SOCK_DGRAM, 0);
+  if (this->rtp_udp_ == nullptr) {
+    ESP_LOGE(TAG, "Failed to create RTP UDP socket");
+    return;
+  }
+  this->rtp_udp_->setblocking(false);
+  struct sockaddr_in rtp_addr = {};
+  rtp_addr.sin_family = AF_INET;
+  rtp_addr.sin_port = htons(1234);
+  rtp_addr.sin_addr.s_addr = INADDR_ANY;
+  if (this->rtp_udp_->bind((struct sockaddr *)&rtp_addr, sizeof(rtp_addr)) != 0) {
+    ESP_LOGE(TAG, "Failed to bind RTP UDP socket");
+    return;
+  }
+  ESP_LOGI(TAG, "RTP listen on port 1234");
+  sip_ = new (std::nothrow) Sip();
+  if (!sip_) {
+    ESP_LOGE(TAG, "Failed to allocate Sip instance");
+    return;
+  }
+  sip_->init(sip_ip_, sip_port_, "192.168.1.100", sip_port_, sip_user_, sip_pass_);
+  if (microphone_) {
+    microphone_->add_data_callback([this](const std::vector<uint8_t> &data) { this->mic_data_callback(data); });
+  }
+  started_ = true;
+  if (this->ready_sensor_) this->ready_sensor_->publish_state(true);
+}
+
+void Voip::stop_component() {
+  if (!started_) return;
+  ESP_LOGI(TAG, "Stopping VoIP component...");
+  if (microphone_) {
+    microphone_->stop();
+  }
+  if (this->rtp_udp_) {
+    // no explicit close on socket::Socket in this component; releasing unique_ptr would close
+    this->rtp_udp_.reset();
+  }
+  if (sip_) {
+    sip_->hangup();
+    delete sip_;
+    sip_ = nullptr;
+  }
+  started_ = false;
+  if (this->ready_sensor_) this->ready_sensor_->publish_state(false);
 }
 
 void Voip::handle_incoming_rtp() {
@@ -847,17 +833,17 @@ void Voip::handle_incoming_rtp() {
 }
 
 void Voip::handle_outgoing_rtp() {
-  if (!sip_->audioport.empty() && !tx_stream_is_running_) {
+  if (sip_ && !sip_->audioport.empty() && !tx_stream_is_running_) {
     tx_stream_is_running_ = true;
     ESP_LOGI(TAG, "Starting RTP stream");
-    microphone_->start();
+    if (microphone_) microphone_->start();
     App.scheduler.set_interval(this, "rtp_tx", 20, [this]() { tx_rtp(); });
-  } else if (sip_->audioport.empty() && tx_stream_is_running_) {
+  } else if ((sip_ && sip_->audioport.empty()) && tx_stream_is_running_) {
     tx_stream_is_running_ = false;
     rx_stream_is_running_ = false;
     rtppkg_size_ = -1;
     ESP_LOGI(TAG, "RTP stream stopped");
-    microphone_->stop();
+    if (microphone_) microphone_->stop();
     App.scheduler.cancel_interval(this, "rtp_tx");
   }
 }
@@ -868,6 +854,7 @@ void Voip::tx_rtp() {
   const uint32_t ssrc = 3124150;
   uint8_t packet_buffer[255];
 
+  if (!started_) return;  // ensure started
   if (codec_type_ == 0) {
     if (!microphone_) {
       ESP_LOGW(TAG, "tx_rtp: microphone_ is null");
@@ -904,6 +891,10 @@ void Voip::tx_rtp() {
     memcpy(rtp_header + 12, temp, 160);
     struct sockaddr_in remote = {};
     remote.sin_family = AF_INET;
+    if (!sip_) {
+      ESP_LOGW(TAG, "tx_rtp: sip_ is null");
+      return;
+    }
     int dest_port = atoi(sip_->audioport.c_str());
     if (dest_port <= 0) {
       ESP_LOGW(TAG, "Invalid audio port: %s", sip_->audioport.c_str());
@@ -917,6 +908,7 @@ void Voip::tx_rtp() {
     inet_pton(AF_INET, sip_->get_sip_server_ip().c_str(), &remote.sin_addr);
     this->rtp_udp_->sendto(packet_buffer, 12 + 160, 0, (struct sockaddr *)&remote, sizeof(remote));
   } else if (codec_type_ == 1) {
+    if (!started_) return; // ensure started
     // PCMA
     uint8_t temp[160];
     if (mic_buffer_.size() >= 640) {
@@ -948,6 +940,10 @@ void Voip::tx_rtp() {
     memcpy(rtp_header + 12, temp, 160);
     struct sockaddr_in remote = {};
     remote.sin_family = AF_INET;
+    if (!sip_) {
+      ESP_LOGW(TAG, "tx_rtp: sip_ is null");
+      return;
+    }
     int dest_port = atoi(sip_->audioport.c_str());
     if (dest_port <= 0) {
       ESP_LOGW(TAG, "Invalid audio port: %s", sip_->audioport.c_str());

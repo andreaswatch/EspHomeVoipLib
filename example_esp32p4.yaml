@@ -99,11 +99,21 @@ switch:
           condition:
             binary_sensor.is_on: voip_ready
           then:
-            - lambda: id(my_voip).start();
+            - lambda: |-
+                if (id(my_voip) != nullptr) {
+                  id(my_voip).start_component();
+                  if (!id(my_voip).get_default_dial_number().empty()) {
+                    id(my_voip).dial(id(my_voip).get_default_dial_number(), "Start");
+                  }
+                }
           else:
-            - logger.log: "VOIP-Switch pressed, but VoIP is not ready"
+            - logger.log: "VOIP-Switch pressed, but VoIP is not hardware-ready"
     turn_off_action:
-      - lambda: id(my_voip).hangup();
+      - lambda: |-
+          if (id(my_voip) != nullptr) {
+            id(my_voip).hangup();
+            id(my_voip).stop_component();
+          }
 
 # Logger für Debugging
 logger:

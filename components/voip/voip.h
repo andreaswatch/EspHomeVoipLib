@@ -100,10 +100,13 @@ class Voip : public Component {
   bool is_busy();
   void hangup();
   void set_codec(int codec);
+  void start_component();
+  void stop_component();
   void set_mic_gain(int gain) { mic_gain_ = gain; }
   void set_amp_gain(int gain) { amp_gain_ = gain; }
   void set_mic(i2s_audio::I2SAudioMicrophone *mic) { microphone_ = mic; }
   void set_speaker(i2s_audio::I2SAudioSpeaker *speaker) { speaker_ = speaker; }
+  void set_ready_sensor(esphome::binary_sensor::BinarySensor *sensor) { ready_sensor_ = sensor; }
   void set_ready_sensor(esphome::binary_sensor::BinarySensor *sensor) { ready_sensor_ = sensor; }
   void set_default_dial_number(const std::string &num) { default_dial_number_ = num; }
   const std::string &get_default_dial_number() const { return default_dial_number_; }
@@ -132,6 +135,7 @@ class Voip : public Component {
   std::string sip_pass_;
   std::vector<uint8_t> mic_buffer_;
   std::string default_dial_number_ = "";
+  bool started_ = false;
   void mic_data_callback(const std::vector<uint8_t> &data);
   void handle_incoming_rtp();
   void handle_outgoing_rtp();
