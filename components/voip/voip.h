@@ -5,14 +5,16 @@
 #include <driver/i2s.h>
 #include "g711.h"
 #include <memory>
+#include <string>
+#include <vector>
 #include "esphome/components/socket/socket.h"
+#include "esphome/components/i2s_audio/microphone/i2s_audio_microphone.h"
+#include "esphome/components/i2s_audio/speaker/i2s_audio_speaker.h"
 #include "esphome/core/scheduler.h"
 #include <chrono>
 
 namespace esphome {
 namespace voip {
-
-using namespace esphome::i2s_audio;
 
 class Sip : public Component {
  public:
@@ -21,13 +23,13 @@ class Sip : public Component {
   void loop() override;
   void dump_config() override;
 
-  void init(const ::std::string &sip_ip, int sip_port, const ::std::string &my_ip, int my_port, const ::std::string &sip_user, const ::std::string &sip_pass);
-  bool dial(const ::std::string &dial_nr, const ::std::string &dial_desc = "");
+  void init(const std::string &sip_ip, int sip_port, const std::string &my_ip, int my_port, const std::string &sip_user, const std::string &sip_pass);
+  bool dial(const std::string &dial_nr, const std::string &dial_desc = "");
   bool is_busy() { return i_ring_time_ != 0; }
   void hangup();
-  const ::std::string &get_sip_server_ip() { return p_sip_ip_; }
+  const std::string &get_sip_server_ip() { return p_sip_ip_; }
   void set_codec(int codec) { codec_ = codec; }
-  ::std::string audioport;
+  std::string audioport;
 
  protected:
   ::std::unique_ptr<socket::Socket> udp_;
@@ -36,14 +38,14 @@ class Sip : public Component {
   size_t l_buf_;
   char ca_read_[256];
 
-  ::std::string p_sip_ip_;
+  std::string p_sip_ip_;
   int i_sip_port_;
-  ::std::string p_sip_user_;
-  ::std::string p_sip_pass_;
-  ::std::string p_my_ip_;
+  std::string p_sip_user_;
+  std::string p_sip_pass_;
+  std::string p_my_ip_;
   int i_my_port_;
-  ::std::string p_dial_nr_;
-  ::std::string p_dial_desc_;
+  std::string p_dial_nr_;
+  std::string p_dial_desc_;
 
   uint32_t callid_;
   uint32_t tagid_;
@@ -58,7 +60,7 @@ class Sip : public Component {
 
   void add_sip_line(const char *const_format, ...);
   bool add_copy_sip_line(const char *p, const char *psearch);
-  bool parse_parameter(::std::string &dest, const char *name, const char *line, char cq = '\"');
+  bool parse_parameter(std::string &dest, const char *name, const char *line, char cq = '\"');
   bool parse_return_params(const char *p);
   int grep_integer(const char *p, const char *psearch);
   void ack(const char *p_in);
@@ -91,18 +93,18 @@ class Voip : public Component {
   void loop() override;
   void dump_config() override;
 
-  void init(const ::std::string &sip_ip, const ::std::string &sip_user, const ::std::string &sip_pass);
-  void dial(const ::std::string &number, const ::std::string &id);
+  void init(const std::string &sip_ip, const std::string &sip_user, const std::string &sip_pass);
+  void dial(const std::string &number, const std::string &id);
   bool is_busy();
   void hangup();
   void set_codec(int codec);
   void set_mic_gain(int gain) { mic_gain_ = gain; }
   void set_amp_gain(int gain) { amp_gain_ = gain; }
-  void set_mic(I2SAudioMicrophone *mic) { microphone_ = mic; }
-  void set_speaker(I2SAudioSpeaker *speaker) { speaker_ = speaker; }
+  void set_mic(i2s_audio::I2SAudioMicrophone *mic) { microphone_ = mic; }
+  void set_speaker(i2s_audio::I2SAudioSpeaker *speaker) { speaker_ = speaker; }
 
-  I2SAudioMicrophone *microphone_ = nullptr;
-  I2SAudioSpeaker *speaker_ = nullptr;
+  i2s_audio::I2SAudioMicrophone *microphone_ = nullptr;
+  i2s_audio::I2SAudioSpeaker *speaker_ = nullptr;
 
  protected:
   Sip *sip_;
@@ -117,16 +119,17 @@ class Voip : public Component {
   int mic_gain_ = MIC_GAIN_DEFAULT;
   int amp_gain_ = AMP_GAIN_DEFAULT;
   int sip_port_ = 5060;
-  ::std::string my_ip_;
-  ::std::string sip_ip_;
-  ::std::string sip_user_;
-  ::std::string sip_pass_;
-  ::std::vector<uint8_t> mic_buffer_;
-  void mic_data_callback(const ::std::vector<uint8_t> &data);
+  std::string my_ip_;
+  std::string sip_ip_;
+  std::string sip_user_;
+  std::string sip_pass_;
+  std::vector<uint8_t> mic_buffer_;
+  void mic_data_callback(const std::vector<uint8_t> &data);
   void handle_incoming_rtp();
   void handle_outgoing_rtp();
   void tx_rtp();
 
+};  // class Voip
 }  // namespace voip
 }  // namespace esphome
 
