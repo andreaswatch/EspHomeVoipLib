@@ -225,10 +225,12 @@ void Sip::add_sip_line(const char *const_format, ...) {
   va_start(arglist, const_format);
   uint16_t l = (uint16_t)strlen(p_buf_);
   char *p = p_buf_ + l;
-  vsnprintf(p, l_buf_ - l, const_format, arglist);
+  int written = vsnprintf(p, l_buf_ - l, const_format, arglist);
   va_end(arglist);
+  // Recompute effective length after append. If truncated, we still compute current length.
   l = (uint16_t)strlen(p_buf_);
-  if (l < (l_buf_ - 2)) {
+  // Add CRLF only if there is at least room for CRLF and null terminator.
+  if (l <= (l_buf_ - 3)) {
     p_buf_[l] = '\r';
     p_buf_[l + 1] = '\n';
     p_buf_[l + 2] = 0;
@@ -241,6 +243,8 @@ bool Sip::parse_parameter(std::string &dest, const char *name, const char *line,
   if ((r = strstr(line, name)) != NULL) {
     r = r + strlen(name);
     qp = strchr(r, cq);
+    if (!qp)
+      return false;
     int l = qp - r;
     if (l > 0) {
       dest.assign(r, l);
@@ -283,8 +287,13 @@ bool Sip::parse_return_params(const char *p) {
   add_copy_sip_line(p, "Via: ");
   add_copy_sip_line(p, "To: ");
   if (strlen(p_buf_) >= 2) {
-    strcpy(ca_read_, p_buf_);
-    ca_read_[strlen(ca_read_) - 2] = 0;
+    // copy safely to ca_read_ which has fixed small size
+    strncpy(ca_read_, p_buf_, sizeof(ca_read_) - 1);
+    ca_read_[sizeof(ca_read_) - 1] = '\0';
+    size_t slen = strlen(ca_read_);
+    if (slen >= 2) {
+      ca_read_[slen - 2] = 0;  // remove trailing CRLF if present
+    }
   }
   return true;
 }
@@ -375,14 +384,16 @@ void Sip::handle_udp_packet() {
     }
     sdpportptr--;
     int i = 0;
-    while (*sdpportptr != ' ' || i > 8) {
+    // walk backwards up to 8 chars or until we find a space (safely stop at start of buffer)
+    while (sdpportptr > p && *sdpportptr != '\0' && *sdpportptr != ' ' && i < 8) {
       i++;
       sdpportptr--;
     }
     sdpportptr++;
     if (i < 7) {
       i = 0;
-      while (*sdpportptr != ' ') {
+      // only copy up to 7 chars or until a space/terminator
+      while (*sdpportptr != ' ' && *sdpportptr != '\0' && i < 7) {
         audioport += *sdpportptr;
         sdpportptr++;
         i++;
