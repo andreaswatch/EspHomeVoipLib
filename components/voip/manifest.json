@@ -3,5 +3,5 @@
   "version": "1.0.0",
   "description": "VoIP component with audio streaming for ESPHome",
   "dependencies": [],
-  "sources": ["g711.cpp"]
+  "sources": ["g711.cpp", "voip.cpp", "md5_util.cpp"]
 }

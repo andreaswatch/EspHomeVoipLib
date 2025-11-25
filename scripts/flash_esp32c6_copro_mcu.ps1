@@ -1,29 +1,14 @@
 <#
-PowerShell helper to download and flash a firmware to the ESP32-C6 co-processor.
+DEPRECATED: The PowerShell flashing helper has been removed from active use.
 
-Usage:
-  .\flash_esp32c6_copro_mcu.ps1 -Port COM7 -Url "https://example.com/esp32c6-firmware.zip" -Flash -EraseAll
+This repository now provides manual instructions for using official Espressif
+"esp-hosted" release assets to flash an ESP32-C6 co-processor. See the
+`ESP-HOSTED-CO-PROCESSOR-FLASHING.md` document in the repo root for step-by-step
+instructions, troubleshooting and recommended esptool commands.
 
-Important:
-- This script uses `python -m esptool` to flash the firmware. Ensure Python and esptool are installed with `pip install esptool`.
-- Flashing will overwrite co-processor contents. Use `-DryRun` first to check everything.
-
-Options:
-  -Port <string>        : COM port for the co-processor (default COM7)
-  -Url <string>         : URL to download the firmware zip/tar containing binary files (optional if using local files)
-  -Bootloader <string>  : explicit local path to bootloader binary
-  -PartTable <string>   : explicit local path to partition-table binary
-  -App <string>         : explicit local path to app binary
-  -Flash                : run esptool write_flash commands (default is DryRun)
-  -EraseAll             : erase the entire flash before flashing
-  -Chip <string>        : chip type (esp32c6 default)
-  -Confirm              : proceed without asking for interactive confirmation
-  -DryRun               : only show what would be done
-
-This script assumes standard addresses:
-  bootloader   -> 0x1000
-  parti tbl    -> 0x8000
-  app/main bin -> 0x10000
+If you still want to use the original script, it has been disabled. Please read
+the README first — manual esptool commands are more transparent and reliable for
+platform-specific variants (e.g. SDIO vs SPI transport).
 
 #>
 

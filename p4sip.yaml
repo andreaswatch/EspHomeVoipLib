@@ -57,9 +57,9 @@ ota:
 # Beispiel-Buttons zum Testen
 button:
   - platform: template
-    name: "Call 004917623575599"
+    name: "Call 017623575599"
     on_press:
-      - lambda: id(my_voip).dial("004917623575599", "Test Call");
+      - lambda: id(my_voip).dial("017623575599", "Test Call");
 
   - platform: template
     name: "Hangup"
@@ -103,12 +103,12 @@ switch:
 # I2S Audio
 i2s_audio:
   - id: i2s_out
-    i2s_lrclk_pin: GPIO8
-    i2s_bclk_pin: GPIO9
-  
-  - id: i2s_in
     i2s_lrclk_pin: GPIO4
     i2s_bclk_pin: GPIO5
+  
+  - id: i2s_in
+    i2s_lrclk_pin: GPIO8
+    i2s_bclk_pin: GPIO9
 
 # Mikrofon
 microphone:
@@ -136,7 +136,7 @@ speaker:
 voip:
   id: my_voip
   sip_ip: "192.168.178.1"  # Ersetzen Sie durch Ihre SIP-Server-IP
-  sip_user: "testclient"       # Ersetzen Sie durch Ihren SIP-Benutzer
+  sip_user: !secret sip_user       # Ersetzen Sie durch Ihren SIP-Benutzer
   sip_pass: !secret sip_password   # Ersetzen Sie durch Ihr SIP-Passwort
   codec: 0               # 0=PCMU, 1=PCMA, 2=G.721
   mic_gain: 2
@@ -147,4 +147,4 @@ voip:
   ready_sensor_id: voip_ready
   # If you want the VoIP component to auto start on boot when hardware is ready, enable:
   start_on_boot: false
-  #default_dial_number: "004917623575599"
+  #default_dial_number: "017623575599"

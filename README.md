@@ -192,3 +192,9 @@ Um die Komponente zu testen, ohne ESPHome global zu installieren, verwenden Sie 
 - Testen Sie die Konfiguration in einer Entwicklungsumgebung.
 - Stellen Sie sicher, dass die I2S-Pins korrekt konfiguriert sind.
 - Für Opus und G.72x Codecs müssen die entsprechenden Bibliotheken kompiliert werden.
+
+## ESP-Hosted Co-Processor flashing (ESP32-C6)
+
+If your board contains an ESP32-C6 co-processor and you need to flash it with Espressif's `esp-hosted` releases, please follow the manual guide in `ESP-HOSTED-CO-PROCESSOR-FLASHING.md`: it explains how to detect the co-processor, how to pick the right release, and how to flash with `esptool`.
+
+> Note: The repository previously included a PowerShell flashing helper. That helper has been deprecated and replaced by documented manual steps. See the `scripts` folder for details (DEPRECATED). If you want me to re-enable or improve a helper script, I can do that on request.

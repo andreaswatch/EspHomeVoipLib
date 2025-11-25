@@ -64,8 +64,8 @@ speaker:
 # VoIP-Komponente
 voip:
   id: my_voip
-  sip_ip: "192.168.1.1"  # Ersetzen Sie durch Ihre SIP-Server-IP
-  sip_user: "user"       # Ersetzen Sie durch Ihren SIP-Benutzer
+  sip_ip: "192.168.178.1"  # Ersetzen Sie durch Ihre SIP-Server-IP
+  sip_user: "testclient"       # Ersetzen Sie durch Ihren SIP-Benutzer
   sip_pass: "password"   # Ersetzen Sie durch Ihr SIP-Passwort
   codec: 0               # 0=PCMU, 1=PCMA, 2=G.721
   mic_gain: 2

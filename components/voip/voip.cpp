@@ -9,7 +9,9 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <algorithm>
+#include <errno.h>
 #include <new>
+#include "md5_util.h"
 
 // Safety helpers
 static inline void safe_strncpy(char *dest, const char *src, size_t destSize) {
@@ -23,6 +25,7 @@ namespace esphome {
 namespace voip {
 
 static const char *const TAG = "voip";
+#define SIP_AUTH_DEBUG 1  // set to 1 to enable additional digest debug (DO NOT USE IN PRODUCTION)
 
 Sip::Sip() : p_buf_(nullptr), l_buf_(2048), i_last_cseq_(0), codec_(0) {
   p_buf_ = new (std::nothrow) char[l_buf_];
@@ -174,11 +177,17 @@ void Sip::invite(const char *p) {
   if (p && i_auth_cnt_ > 3)
     return;
 
-  // using caRead for temp. store realm and nonce
-  char *ca_realm = ca_read_;
-  char *ca_nonce = ca_read_ + 128;
+  // ca_read_ is a small buffer used for copying return params; we now parse
+  // realm/nonce into std::string variables instead of relying on ca_read_.
+  std::string realm, nonce, qop;
+  bool qop_auth = false;
 
   char *ha_resp = nullptr;
+  // local MD5 buffers allocated once per invite
+  char ha1_hex[33] = {0};
+  char ha2_hex[33] = {0};
+  char ha_resp_local[33] = {0};
+  char p_temp[256] = {0};
   int cseq = 1;
   if (!p) {
     i_auth_cnt_ = 0;
@@ -189,30 +198,59 @@ void Sip::invite(const char *p) {
     }
   } else {
     cseq = 2;
-    std::string realm, nonce;
     if (parse_parameter(realm, " realm=\"", p) &&
-        parse_parameter(nonce, " nonce=\"", p)) {
+      parse_parameter(nonce, " nonce=\"", p)) {
+      (void)parse_parameter(qop, " qop=\"", p); // optional
+      if (!qop.empty() && qop.find("auth") != std::string::npos) qop_auth = true;
       if (!p_buf_ || l_buf_ < 132) {
         ESP_LOGE(TAG, "Insufficient buffer for md5 digest building");
         ca_read_[0] = 0;
         return;
       }
-      // using output buffer to build the md5 hashes
-      // store the md5 haResp to end of buffer
-      char *ha1_hex = p_buf_;
-      char *ha2_hex = p_buf_ + 33;
-      ha_resp = p_buf_ + l_buf_ - 34;
-      char *p_temp = p_buf_ + 66;
-      ESP_LOGD(TAG, "MD5 buffers: ha1_hex=%p ha2_hex=%p ha_resp=%p p_temp=%p l_buf=%u", ha1_hex, ha2_hex, ha_resp, p_temp, (unsigned)l_buf_);
+      // compute MD5 digest values in local buffers (do not use p_buf_ as it's
+      // later cleared when building the SIP packet)
 
-      snprintf(p_temp, l_buf_ - 100, "%s:%s:%s", p_sip_user_.c_str(), realm.c_str(), p_sip_pass_.c_str());
+      ESP_LOGD(TAG, "MD5 compute: temp buffer len=%d", (int)sizeof(p_temp));
+      snprintf(p_temp, sizeof(p_temp), "%s:%s:%s", p_sip_user_.c_str(), realm.c_str(), p_sip_pass_.c_str());
       make_md5_digest(ha1_hex, p_temp);
 
-      snprintf(p_temp, l_buf_ - 100, "INVITE:sip:%s@%s", p_dial_nr_.c_str(), p_sip_ip_.c_str());
+      snprintf(p_temp, sizeof(p_temp), "INVITE:sip:%s@%s", p_dial_nr_.c_str(), p_sip_ip_.c_str());
       make_md5_digest(ha2_hex, p_temp);
 
-      snprintf(p_temp, l_buf_ - 100, "%s:%s:%s", ha1_hex, nonce.c_str(), ha2_hex);
-      make_md5_digest(ha_resp, p_temp);
+      // realm and nonce are parsed into std::string variables and used below.
+      if (qop_auth) {
+        // ensure cnonce and nc handling
+        if (last_nonce_.empty() || last_nonce_ != nonce) {
+          last_nonce_ = nonce;
+          auth_nc_ = 1;
+          // generate cnonce using two random 32-bit values
+          char cnonce_buf[33];
+          snprintf(cnonce_buf, sizeof(cnonce_buf), "%08x%08x", this->random(), this->random());
+          cnonce_.assign(cnonce_buf);
+        } else {
+          auth_nc_++;
+        }
+        char nc_str[9];
+        snprintf(nc_str, sizeof(nc_str), "%08x", auth_nc_);
+        // compute HA1:nonce:nc:cnonce:qop:HA2
+        snprintf(p_temp, sizeof(p_temp), "%s:%s:%s:%s:%s:%s", ha1_hex, nonce.c_str(), nc_str, cnonce_.c_str(), "auth", ha2_hex);
+        make_md5_digest(ha_resp_local, p_temp);
+        ha_resp = ha_resp_local;
+      } else {
+        // old-style digest (no qop)
+        snprintf(p_temp, sizeof(p_temp), "%s:%s:%s", ha1_hex, nonce.c_str(), ha2_hex);
+        make_md5_digest(ha_resp_local, p_temp);
+        ha_resp = ha_resp_local;
+      }
+    #if SIP_AUTH_DEBUG
+      // Print only partial masked response to avoid leaking full auth response
+      char res_mask[9] = {0};
+      if (ha_resp) {
+        strncpy(res_mask, ha_resp, 8);
+        res_mask[8] = '\0';
+      }
+      ESP_LOGD(TAG, "SIP digest computed: realm=%s nonce=%s response[0..7]=%s cseq=%d", realm.c_str(), nonce.c_str(), res_mask, cseq);
+    #endif
     } else {
       ca_read_[0] = 0;
       return;
@@ -230,7 +268,26 @@ void Sip::invite(const char *p) {
   add_sip_line("Contact: \"%s\" <sip:%s@%s:%i;transport=udp>", p_sip_user_.c_str(), p_sip_user_.c_str(), p_my_ip_.c_str(), i_my_port_);
   if (p) {
     // authentication
-    add_sip_line("Authorization: Digest username=\"%s\", realm=\"%s\", nonce=\"%s\", uri=\"sip:%s@%s\", response=\"%s\"", p_sip_user_.c_str(), ca_realm, ca_nonce, p_dial_nr_.c_str(), p_sip_ip_.c_str(), ha_resp);
+    if (qop_auth) {
+      // include qop, nc, and cnonce
+      char nc_str[9];
+      snprintf(nc_str, sizeof(nc_str), "%08x", auth_nc_);
+      add_sip_line("Authorization: Digest username=\"%s\", realm=\"%s\", nonce=\"%s\", uri=\"sip:%s@%s\", response=\"%s\", qop=auth, nc=%s, cnonce=\"%s\"",
+                   p_sip_user_.c_str(), realm.c_str(), nonce.c_str(), p_dial_nr_.c_str(), p_sip_ip_.c_str(), ha_resp, nc_str, cnonce_.c_str());
+      #if SIP_AUTH_DEBUG
+      // Mask cnonce in logs (show first 8 characters)
+      char cnonce_mask[9] = {0};
+      if (!cnonce_.empty()) {
+        strncpy(cnonce_mask, cnonce_.c_str(), 8);
+        cnonce_mask[8] = '\0';
+      }
+      ESP_LOGD(TAG, "Authorization (qop=auth): qop=auth, nc=%s, cnonce[0..7]=%s", nc_str, cnonce_mask);
+      #endif
+    } else {
+      add_sip_line("Authorization: Digest username=\"%s\", realm=\"%s\", nonce=\"%s\", uri=\"sip:%s@%s\", response=\"%s\"",
+                   p_sip_user_.c_str(), realm.c_str(), nonce.c_str(), p_dial_nr_.c_str(), p_sip_ip_.c_str(), ha_resp);
+    }
+    // Do not log Authorization header to avoid leaking auth details.
     i_auth_cnt_++;
   }
   add_sip_line("Content-Type: application/sdp");
@@ -493,6 +550,37 @@ int Sip::send_udp() {
     return -1;
   }
   ESP_LOGD(TAG, "Sending SIP packet to %s:%d", p_sip_ip_.c_str(), i_sip_port_);
+  // Create a redacted copy for logging so Authorization headers are not leaked
+  char pbuf_masked[2048];
+  size_t sl = safe_strlen(p_buf_);
+  if (sl >= sizeof(pbuf_masked)) sl = sizeof(pbuf_masked) - 1;
+  memcpy(pbuf_masked, p_buf_, sl);
+  pbuf_masked[sl] = '\0';
+  const char *auth_str = "Authorization:";
+  char *pos = strstr(pbuf_masked, auth_str);
+  if (pos) {
+    // find end of line
+    char *eol = strstr(pos, "\r\n");
+    if (!eol) eol = strstr(pos, "\n");
+    if (eol) {
+      // replace the entire authorization header line with redaction text
+      const char *redaction = "Authorization: Digest <REDACTED>";
+      size_t redlen = strlen(redaction);
+      size_t rest = strlen(eol);
+      // move tail forward/backwards depending on length
+      if (redlen <= (size_t)(eol - pos)) {
+        memcpy(pos, redaction, redlen);
+        // pad remainder with spaces to keep lengths same
+        for (size_t i = redlen; i < (size_t)(eol - pos); ++i) pos[i] = ' ';
+      } else {
+        // truncated: write redaction and then shift tail if space
+        memcpy(pos, redaction, redlen);
+        // then write eol
+        // If redlen larger than available, just truncate the buffer at pos + redlen
+      }
+    }
+  }
+  ESP_LOGD(TAG, "SIP packet content:\n%s", pbuf_masked);
   struct sockaddr_in remote = {};
   remote.sin_family = AF_INET;
   remote.sin_port = htons(i_sip_port_);
@@ -516,21 +604,14 @@ uint32_t Sip::millis() {
 
 void Sip::make_md5_digest(char *p_out_hex33, char *p_in) {
   if (!p_out_hex33 || !p_in) return;
-  unsigned char output[16];
-  const mbedtls_md_info_t *md_info = mbedtls_md_info_from_type(MBEDTLS_MD_MD5);
-  if (md_info == nullptr) {
-    // fallback: zero out output
-    memset(output, 0, sizeof(output));
-  } else {
-    size_t in_len = safe_strlen(p_in);
-    mbedtls_md(md_info, (const unsigned char *)p_in, in_len, output);
+  // reuse md5_hex helper to return lowercase hex string and copy to p_out
+  std::string s = md5_hex(std::string(p_in));
+  if (s.size() != 32) {
+    // Failed - ensure zeroed string
+    memset(p_out_hex33, 0, 33);
+    return;
   }
-  for (int i = 0; i < 16; i++) {
-    // write exactly two chars and null-terminate next position for safety
-    snprintf(&p_out_hex33[i * 2], 3, "%02x", output[i]);
-  }
-  // ensure full buffer is null terminated (32 chars + 1)
-  p_out_hex33[32] = '\0';
+  memcpy(p_out_hex33, s.c_str(), 33); // including null terminator
 }
 
 void Sip::hangup() {
@@ -864,8 +945,20 @@ void Voip::handle_incoming_rtp() {
     struct sockaddr_in remote;
     socklen_t addrlen = sizeof(remote);
     packet_size_ = this->rtp_udp_->recvfrom(rtp_buffer_, sizeof(rtp_buffer_), (struct sockaddr *)&remote, &addrlen);
-    if (packet_size_ <= 0) return;
-    if ((size_t)packet_size_ > sizeof(rtp_buffer_)) {
+    if (packet_size_ < 0) {
+      // Non-blocking sockets return -1 with errno==EAGAIN/EWOULDBLOCK when
+      // there's no data available; ignore silently in that case.
+      if (errno == EAGAIN || errno == EWOULDBLOCK) return;
+      static uint32_t last_rtp_recv_error_log = 0;
+      uint32_t now = (uint32_t)esphome::millis();
+      if ((int32_t)(now - last_rtp_recv_error_log) > 5000) {
+        last_rtp_recv_error_log = now;
+        ESP_LOGW(TAG, "RTP recvfrom error=%d errno=%d (%s)", packet_size_, errno, strerror(errno));
+      }
+      return;
+    }
+    if (packet_size_ == 0) return;
+    if (packet_size_ > (int)sizeof(rtp_buffer_)) {
       ESP_LOGW(TAG, "RTP packet too large: %d, truncating to %u", packet_size_, (unsigned)sizeof(rtp_buffer_));
       packet_size_ = sizeof(rtp_buffer_);
     }
@@ -888,8 +981,18 @@ void Voip::handle_incoming_rtp() {
     struct sockaddr_in remote;
     socklen_t addrlen = sizeof(remote);
     packet_size_ = this->rtp_udp_->recvfrom(rtp_buffer_, sizeof(rtp_buffer_), (struct sockaddr *)&remote, &addrlen);
-    if (packet_size_ <= 0) return;
-    if ((size_t)packet_size_ > sizeof(rtp_buffer_)) {
+    if (packet_size_ < 0) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK) return;
+      static uint32_t last_rtp_recv_error_log2 = 0;
+      uint32_t now2 = (uint32_t)esphome::millis();
+      if ((int32_t)(now2 - last_rtp_recv_error_log2) > 5000) {
+        last_rtp_recv_error_log2 = now2;
+        ESP_LOGW(TAG, "RTP recvfrom error=%d errno=%d (%s)", packet_size_, errno, strerror(errno));
+      }
+      return;
+    }
+    if (packet_size_ == 0) return;
+    if (packet_size_ > (int)sizeof(rtp_buffer_)) {
       ESP_LOGW(TAG, "RTP packet too large: %d, truncating to %u", packet_size_, (unsigned)sizeof(rtp_buffer_));
       packet_size_ = sizeof(rtp_buffer_);
     }

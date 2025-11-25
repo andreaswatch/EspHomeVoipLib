@@ -54,6 +54,10 @@ class Sip : public Component {
   uint32_t branchid_;
 
   int i_auth_cnt_;
+  // For qop=auth support
+  std::string cnonce_;
+  std::string last_nonce_;
+  uint32_t auth_nc_ = 0;
   uint32_t i_ring_time_;
   uint32_t i_max_time_;
   int i_dial_retries_;
@@ -123,7 +127,8 @@ class Voip : public Component {
   bool tx_stream_is_running_ = false;
   bool rx_stream_is_running_ = false;
   int rtppkg_size_ = -1;
-  size_t packet_size_;
+  // signed on purpose: will be -1 on recv error; avoid unsigned which hides errors
+  int packet_size_;
   uint8_t rtp_buffer_[2048];
   int codec_type_ = 1;
   int mic_gain_ = MIC_GAIN_DEFAULT;
