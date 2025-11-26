@@ -157,6 +157,24 @@ logger:
   level: DEBUG
 ```
 
+
+## Waveshare ESP32-P4 Dev Board (ES8311)
+
+If you use the Waveshare ESP32-P4 Dev Board with an ES8311 codec, the Waveshare default I2S pin mapping is:
+
+- MCLK: GPIO13
+- BCLK / SCLK: GPIO12
+- LRCK (WS): GPIO10
+- DIN (DATA_IN / DSDIN): GPIO9
+- DOUT (DATA_OUT / ASDOUT): GPIO11
+- PA_Ctrl (power amp enable): GPIO53
+
+This mapping is the hardware default on the Waveshare dev board; use it in your YAML as shown in `p4sip.yaml` / `example_esp32p4.yaml`. If you are using another dev board or a custom breakout, verify the board schematic and use the correct pins for LRCLK/BCLK/DIN/DOUT and, if necessary, connect MCLK as well.
+
+To quickly test the microphone input on that board, use `i2s_test.yaml` (the included example in this repo). It uses the Waveshare ES8311 mapping and logs the microphone sample size when the mic is started.
+
+
+
 ## Testen mit ESPHome in Docker
 
 Um die Komponente zu testen, ohne ESPHome global zu installieren, verwenden Sie Docker:

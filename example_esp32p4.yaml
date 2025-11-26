@@ -6,6 +6,8 @@ esp32:
   variant: ESP32P4
   framework:
     type: esp-idf
+  build_flags:
+    - -UUSE_I2S_LEGACY
 
 # ESP32-C6 Co-Prozessor (falls benötigt für das Dev Kit)
 esp32_hosted:
@@ -26,26 +28,26 @@ external_components:
 socket:
 
 wifi:
-  ssid: "YourWiFiSSID"
-  password: "YourWiFiPassword"
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
 
 # I2S Audio
 i2s_audio:
-  - id: i2s_out
-    i2s_lrclk_pin: GPIO8
-    i2s_bclk_pin: GPIO9
-  
-  - id: i2s_in
-    i2s_lrclk_pin: GPIO4
-    i2s_bclk_pin: GPIO5
+  - id: i2s_bus
+    # Waveshare ESP32-P4 Dev Kit (ES8311) default pins — shared bus
+    i2s_mclk_pin: GPIO13
+    i2s_lrclk_pin: GPIO10
+    i2s_bclk_pin: GPIO12
+    mclk_multiple: 256
 
 # Mikrofon
 microphone:
   - platform: i2s_audio
     id: board_microphone
     adc_type: external
-    i2s_audio_id: i2s_in
-    i2s_din_pin: GPIO6
+    i2s_audio_id: i2s_bus
+    # Waveshare ES8311: DSDIN = GPIO9
+    i2s_din_pin: GPIO9
     pdm: false
     channel: left
     sample_rate: 16000
@@ -55,9 +57,10 @@ microphone:
 speaker:
   - platform: i2s_audio
     id: board_speaker
-    i2s_audio_id: i2s_out
+    i2s_audio_id: i2s_bus
     dac_type: external
-    i2s_dout_pin: GPIO10
+    # Waveshare ES8311: ASDOUT = GPIO11
+    i2s_dout_pin: GPIO11
     sample_rate: 16000
     bits_per_sample: 16bit
 
@@ -72,9 +75,26 @@ voip:
   amp_gain: 6
   mic_id: board_microphone
   speaker_id: board_speaker
-  # Optional: Provide a binary sensor for readiness and a default number for start
-  ready_sensor_id: voip_ready
-  default_dial_number: "123"
+  # Optional: events to control PA (amplifier) via automations
+  on_call_established:
+    - then:
+        - switch.turn_on: pa_power
+  on_call_ended:
+    - then:
+        - switch.turn_off: pa_power
+  # Optional: Use on_ready/on_not_ready automations for readiness; start_on_boot can auto-start component
+  # default_dial_number removed - use automations to dial instead
+  on_ready:
+    - then:
+        - logger.log: "VoIP: hardware ready"
+  on_not_ready:
+    - then:
+        - logger.log: "VoIP: hardware not ready"
+# PA control using an output (the automation above toggles this)
+output:
+  - platform: gpio
+    pin: GPIO53
+    id: pa_power
 
 # Beispiel-Buttons zum Testen
 button:
@@ -95,19 +115,10 @@ switch:
     optimistic: true
     restore_mode: RESTORE_DEFAULT_OFF
     turn_on_action:
-      - if:
-          condition:
-            binary_sensor.is_on: voip_ready
-          then:
-            - lambda: |-
-                if (id(my_voip) != nullptr) {
-                  id(my_voip).start_component();
-                  if (!id(my_voip).get_default_dial_number().empty()) {
-                    id(my_voip).dial(id(my_voip).get_default_dial_number(), "Start");
-                  }
-                }
-          else:
-            - logger.log: "VOIP-Switch pressed, but VoIP is not hardware-ready"
+      - lambda: |-
+          if (id(my_voip) != nullptr) {
+            id(my_voip).start_component();
+          }
     turn_off_action:
       - lambda: |-
           if (id(my_voip) != nullptr) {
@@ -119,7 +130,3 @@ switch:
 logger:
   level: DEBUG
 
-binary_sensor:
-  - platform: template
-    name: "VoIP Ready"
-    id: voip_ready

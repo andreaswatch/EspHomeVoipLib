@@ -4,6 +4,7 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/hal.h"
 #include <esp_system.h>
+#include <freertos/FreeRTOS.h>
 #include "mbedtls/md5.h"
 #include "mbedtls/md.h"
 #include <netinet/in.h>
@@ -810,13 +811,17 @@ Voip::~Voip() {
 void Voip::setup() {
   ESP_LOGI(TAG, "VoIP setup called");
   started_ = false;
-  // report hardware readiness (mic + speaker available) to the binary sensor
-  if (this->ready_sensor_) {
-    bool hw_ready = (this->microphone_ != nullptr) && (this->speaker_ != nullptr);
-    this->ready_sensor_->publish_state(hw_ready);
-    ESP_LOGI(TAG, "VoIP ready sensor published: %d", hw_ready);
+  // Report hardware readiness via automation events instead of a binary sensor
+  bool hw_ready = (this->microphone_ != nullptr) && (this->speaker_ != nullptr);
+  if (hw_ready && !this->last_hw_ready_) {
+    ESP_LOGI(TAG, "VoIP ready: true (notify)");
+    this->notify_ready();
+  } else if (!hw_ready && this->last_hw_ready_) {
+    ESP_LOGI(TAG, "VoIP ready: false (notify)");
+    this->notify_not_ready();
   }
-  ESP_LOGI(TAG, "VoIP setup finished: mic=%p speaker=%p ready_sensor=%p", microphone_, speaker_, ready_sensor_);
+  this->last_hw_ready_ = hw_ready;
+  ESP_LOGI(TAG, "VoIP setup finished: mic=%p speaker=%p", microphone_, speaker_);
   // If configured, attempt to start VoIP automatically when hardware is ready
   if (start_on_boot_) {
     bool hw_ready = (this->microphone_ != nullptr) && (this->speaker_ != nullptr);
@@ -831,10 +836,14 @@ void Voip::setup() {
 
 void Voip::loop() {
   // Maintain readiness state (hardware ready = microphone + speaker available)
-  if (this->ready_sensor_) {
-    bool hw_ready = (this->microphone_ != nullptr) && (this->speaker_ != nullptr);
-    this->ready_sensor_->publish_state(hw_ready);
+  // Continuously monitor hardware readiness and notify on changes
+  bool hw_ready_loop = (this->microphone_ != nullptr) && (this->speaker_ != nullptr);
+  if (hw_ready_loop && !this->last_hw_ready_) {
+    this->notify_ready();
+  } else if (!hw_ready_loop && this->last_hw_ready_) {
+    this->notify_not_ready();
   }
+  this->last_hw_ready_ = hw_ready_loop;
   // if (network::is_connected()) {
     if (this->rtp_udp_) {
       handle_incoming_rtp();
@@ -843,6 +852,24 @@ void Voip::loop() {
       handle_outgoing_rtp();
       sip_->loop();
     }
+  // Automations: detect SIP/stream state transitions
+  if (sip_) {
+    bool current_busy = sip_->is_busy();
+    if (current_busy && !this->last_sip_busy_) {
+      // just started ringing
+      this->notify_ringing();
+    } else if (!current_busy && this->last_sip_busy_) {
+      // stopped busy -> call ended
+      this->notify_call_ended();
+    }
+    this->last_sip_busy_ = current_busy;
+  }
+  if (this->tx_stream_is_running_ && !this->last_tx_stream_is_running_) {
+    this->notify_call_established();
+  } else if (!this->tx_stream_is_running_ && this->last_tx_stream_is_running_) {
+    this->notify_call_ended();
+  }
+  this->last_tx_stream_is_running_ = this->tx_stream_is_running_;
   // }
 }
 
@@ -887,13 +914,41 @@ void Voip::start_component() {
     ESP_LOGW(TAG, "VoIP already started");
     return;
   }
+  if (start_pending_) {
+    ESP_LOGW(TAG, "VoIP start already scheduled");
+    return;
+  }
+  // Defer the actual heavy initialization to loop context / scheduler to avoid creating sockets during early setup
+  ESP_LOGI(TAG, "Scheduling VoIP component start (deferred)");
+  start_pending_ = true;
+  // Schedule the finish on the scheduler (short delay to allow system initialization to complete)
+  App.scheduler.set_timeout(this, "voip_finish_start", 10, [this]() { this->finish_start_component(); });
+}
+
+void Voip::finish_start_component() {
+  start_pending_ = false;
+  if (started_) {
+    ESP_LOGW(TAG, "finish_start_component called but VoIP already started");
+    return;
+  }
   ESP_LOGI(TAG, "Starting VoIP component...");
+  ESP_LOGD(TAG, "VoIP finish_start_component: entering start sequence (core=%d)", xPortGetCoreID());
   // create RTP socket and SIP component
+  ESP_LOGI(TAG, "Free heap before RTP socket creation: %u", esp_get_free_heap_size());
+  ESP_LOGD(TAG, "VoIP finish_start_component: creating RTP UDP socket");
   this->rtp_udp_ = socket::socket(AF_INET, SOCK_DGRAM, 0);
   if (this->rtp_udp_ == nullptr) {
     ESP_LOGE(TAG, "Failed to create RTP UDP socket");
+    if (start_retries_ < 10) {
+      start_retries_++;
+      uint32_t delay_ms = 1000 * start_retries_;
+      ESP_LOGW(TAG, "Will retry voip start in %u ms (attempt %d)", delay_ms, start_retries_);
+      this->start_pending_ = true;
+      App.scheduler.set_timeout(this, "voip_finish_start_retry", delay_ms, [this]() { this->finish_start_component(); });
+    }
     return;
   }
+  ESP_LOGD(TAG, "VoIP finish_start_component: created RTP UDP socket: fd=%d", this->rtp_udp_->get_fd());
   this->rtp_udp_->setblocking(false);
   struct sockaddr_in rtp_addr = {};
   rtp_addr.sin_family = AF_INET;
@@ -904,19 +959,41 @@ void Voip::start_component() {
     return;
   }
   ESP_LOGI(TAG, "RTP listen on port 1234");
+  ESP_LOGD(TAG, "VoIP finish_start_component: allocating Sip object");
   sip_ = new (std::nothrow) Sip();
   if (!sip_) {
     ESP_LOGE(TAG, "Failed to allocate Sip instance");
+    if (start_retries_ < 10) {
+      start_retries_++;
+      uint32_t delay_ms = 1000 * start_retries_;
+      ESP_LOGW(TAG, "Will retry voip start in %u ms (attempt %d)", delay_ms, start_retries_);
+      this->start_pending_ = true;
+      App.scheduler.set_timeout(this, "voip_finish_start_retry", delay_ms, [this]() { this->finish_start_component(); });
+    }
     return;
   }
+  ESP_LOGI(TAG, "Free heap after Sip allocation: %u", esp_get_free_heap_size());
+  ESP_LOGD(TAG, "VoIP finish_start_component: Sip allocated: %p", sip_);
   ESP_LOGI(TAG, "Initializing SIP subcomponent: server=%s port=%d user=%s", sip_ip_.c_str(), sip_port_, sip_user_.c_str());
+  ESP_LOGD(TAG, "VoIP finish_start_component: initializing Sip subcomponent");
   sip_->init(sip_ip_, sip_port_, "192.168.1.100", sip_port_, sip_user_, sip_pass_);
+  ESP_LOGD(TAG, "VoIP finish_start_component: Sip initialized");
   ESP_LOGI(TAG, "Sip initialized: %p", sip_);
   if (microphone_) {
+    ESP_LOGD(TAG, "VoIP finish_start_component: registering microphone data callback");
     microphone_->add_data_callback([this](const std::vector<uint8_t> &data) { this->mic_data_callback(data); });
+  } else {
+    ESP_LOGW(TAG, "VoIP finish_start_component: microphone_ is null, continuing without mic callbacks");
   }
   started_ = true;
-  if (this->ready_sensor_) this->ready_sensor_->publish_state(true);
+  start_retries_ = 0;
+  ESP_LOGI(TAG, "Voip finish_start_component: started_ set to true");
+  // Notify that hardware is ready when starting
+  if (!this->last_hw_ready_) {
+    this->notify_ready();
+    this->last_hw_ready_ = true;
+  }
+  // PA control removed; use automations (on_call_established) to toggle PA instead
 }
 
 void Voip::stop_component() {
@@ -935,7 +1012,42 @@ void Voip::stop_component() {
     sip_ = nullptr;
   }
   started_ = false;
-  if (this->ready_sensor_) this->ready_sensor_->publish_state(false);
+  // Notify that hardware is not ready when stopping
+  if (this->last_hw_ready_) {
+    this->notify_not_ready();
+    this->last_hw_ready_ = false;
+  }
+  // PA control removed; use automations (on_call_ended) to toggle PA instead
+}
+
+void Voip::notify_ringing() {
+  for (auto &cb : on_ringing_callbacks_) {
+    cb();
+  }
+}
+
+void Voip::notify_call_established() {
+  for (auto &cb : on_call_established_callbacks_) {
+    cb();
+  }
+}
+
+void Voip::notify_call_ended() {
+  for (auto &cb : on_call_ended_callbacks_) {
+    cb();
+  }
+}
+
+void Voip::notify_ready() {
+  for (auto &cb : on_ready_callbacks_) {
+    cb();
+  }
+}
+
+void Voip::notify_not_ready() {
+  for (auto &cb : on_not_ready_callbacks_) {
+    cb();
+  }
 }
 
 void Voip::handle_incoming_rtp() {

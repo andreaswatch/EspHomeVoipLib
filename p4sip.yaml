@@ -1,11 +1,11 @@
 esphome:
   name: p4sip
   friendly_name: p4sip
-  platformio_options:
-    board_build.flash_mode: dio
+  #platformio_options:
+  #  board_build.flash_mode: dio
 
 esp32:
-  board: esp32-p4-evboard
+  board: esp32-p4-evboard # Waveshare ESP32-P4 Dev Kit
   variant: ESP32P4
   framework:
     type: esp-idf
@@ -43,6 +43,7 @@ logger:
   logs:
     voice_assistant: VERBOSE
     api: DEBUG
+    i2s_audio: DEBUG
 
 # API
 api:
@@ -66,10 +67,7 @@ button:
     on_press:
       - lambda: id(my_voip).hangup();
 
-binary_sensor:
-  - platform: template
-    name: "VoIP Ready"
-    id: voip_ready
+
 
 
 switch:
@@ -79,19 +77,10 @@ switch:
     optimistic: true
     restore_mode: RESTORE_DEFAULT_OFF
     turn_on_action:
-      - if:
-          condition:
-            binary_sensor.is_on: voip_ready
-          then:
-            - lambda: |-
-                if (id(my_voip) != nullptr) {
-                  id(my_voip).start_component();
-                  if (!id(my_voip).get_default_dial_number().empty()) {
-                    id(my_voip).dial(id(my_voip).get_default_dial_number(), "Start");
-                  }
-                }
-          else:
-            - logger.log: "VOIP-Switch pressed, but VoIP is not hardware-ready"
+      - lambda: |-
+          if (id(my_voip) != nullptr) {
+            id(my_voip).start_component();
+          }
     turn_off_action:
       - lambda: |-
           if (id(my_voip) != nullptr) {
@@ -99,24 +88,38 @@ switch:
             id(my_voip).stop_component();
           }
 
+  - platform: output
+    name: "PA Power"
+    id: pa_power
+    output: pa_ctrl
+    restore_mode: ALWAYS_OFF
+
 
 # I2S Audio
 i2s_audio:
-  - id: i2s_out
-    i2s_lrclk_pin: GPIO4
-    i2s_bclk_pin: GPIO5
-  
-  - id: i2s_in
-    i2s_lrclk_pin: GPIO8
-    i2s_bclk_pin: GPIO9
+  - id: i2s_bus
+    # Waveshare ESP32-P4 Dev Kit (ES8311) default pins — shared I2S bus
+    i2s_mclk_pin: GPIO13
+    i2s_lrclk_pin: GPIO10
+    i2s_bclk_pin: GPIO12
+
+# Optional pin to control amplifier on the Waveshare board (PA_Ctrl)
+output:
+  - platform: gpio
+    pin: GPIO53
+    id: pa_ctrl
+    inverted: false
+    #restore_mode: ALWAYS_OFF
+    #restore_mode: RESTORE_DEFAULT_OFF
 
 # Mikrofon
 microphone:
   - platform: i2s_audio
     id: board_microphone
     adc_type: external
-    i2s_audio_id: i2s_in
-    i2s_din_pin: GPIO6
+    i2s_audio_id: i2s_bus
+    # Waveshare ES8311: DSDIN = GPIO9
+    i2s_din_pin: GPIO9
     pdm: false
     channel: left
     sample_rate: 8000
@@ -126,9 +129,10 @@ microphone:
 speaker:
   - platform: i2s_audio
     id: board_speaker
-    i2s_audio_id: i2s_out
+    i2s_audio_id: i2s_bus
     dac_type: external
-    i2s_dout_pin: GPIO10
+    # Waveshare ES8311: ASDOUT = GPIO11
+    i2s_dout_pin: GPIO11
     sample_rate: 8000
     bits_per_sample: 16bit
 
@@ -143,8 +147,19 @@ voip:
   amp_gain: 6
   mic_id: board_microphone
   speaker_id: board_speaker
-  # Optional: Provide a binary sensor for readiness and a default number for start
-  ready_sensor_id: voip_ready
+  # Optional events to control PA (amplifier) via automations
+  on_call_established:
+    - then:
+      - switch.turn_on: pa_power
+  on_call_ended:
+    - then:
+      - switch.turn_off: pa_power
+  on_ready:
+    - then:
+      - logger.log: "VoIP: hardware ready"
+  on_not_ready:
+    - then:
+      - logger.log: "VoIP: hardware not ready"
+  # Optional: Use on_ready/on_not_ready automations for readiness; start_on_boot can auto-start component
   # If you want the VoIP component to auto start on boot when hardware is ready, enable:
   start_on_boot: false
-  #default_dial_number: "017623575599"

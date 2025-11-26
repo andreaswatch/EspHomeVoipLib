@@ -2,6 +2,10 @@
     "files.associations": {
         "*.yaml": "yaml",
         "random": "cpp",
-        "new": "cpp"
+        "new": "cpp",
+        "array": "cpp",
+        "string": "cpp",
+        "string_view": "cpp",
+        "span": "cpp"
     }
 }

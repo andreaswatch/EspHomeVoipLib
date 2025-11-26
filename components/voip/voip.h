@@ -2,7 +2,7 @@
 #define ESPHOME_VOIP_H
 
 #include "esphome.h"
-#include <driver/i2s.h>
+#include <driver/i2s_std.h>
 #include "g711.h"
 #include <memory>
 #include <string>
@@ -12,7 +12,10 @@
 #include "esphome/components/i2s_audio/speaker/i2s_audio_speaker.h"
 #include "esphome/core/scheduler.h"
 #include <chrono>
-#include "esphome/components/binary_sensor/binary_sensor.h"
+#include "esphome/core/defines.h"
+// Removed include of automation.h here to avoid circular include - automation.h includes voip.h
+#include <esphome/core/defines.h>
+// Output forward declaration removed - VoIP no longer controls PA output directly
 
 namespace esphome {
 namespace voip {
@@ -105,20 +108,26 @@ class Voip : public Component {
   void hangup();
   void set_codec(int codec);
   void start_component();
+  void finish_start_component();
   void stop_component();
   void set_mic_gain(int gain) { mic_gain_ = gain; }
   void set_amp_gain(int gain) { amp_gain_ = gain; }
   void set_mic(i2s_audio::I2SAudioMicrophone *mic) { microphone_ = mic; }
   void set_speaker(i2s_audio::I2SAudioSpeaker *speaker) { speaker_ = speaker; }
-  void set_ready_sensor(esphome::binary_sensor::BinarySensor *sensor) { ready_sensor_ = sensor; }
-  void set_default_dial_number(const std::string &num) { default_dial_number_ = num; }
+  // ready sensor removed - use on_ready/on_not_ready automation events instead
+  // Automation register methods - exposed publicly for automation triggers
+  void add_on_ringing_callback(std::function<void()> &&cb) { on_ringing_callbacks_.push_back(std::move(cb)); }
+  void add_on_call_established_callback(std::function<void()> &&cb) { on_call_established_callbacks_.push_back(std::move(cb)); }
+  void add_on_call_ended_callback(std::function<void()> &&cb) { on_call_ended_callbacks_.push_back(std::move(cb)); }
+  void add_on_ready_callback(std::function<void()> &&cb) { on_ready_callbacks_.push_back(std::move(cb)); }
+  void add_on_not_ready_callback(std::function<void()> &&cb) { on_not_ready_callbacks_.push_back(std::move(cb)); }
   void set_start_on_boot(bool v) { start_on_boot_ = v; }
-  const std::string &get_default_dial_number() const { return default_dial_number_; }
-  void start() { if (!default_dial_number_.empty()) dial(default_dial_number_, "Start"); }
+  // default dial number removed from API
 
   i2s_audio::I2SAudioMicrophone *microphone_ = nullptr;
   i2s_audio::I2SAudioSpeaker *speaker_ = nullptr;
-  esphome::binary_sensor::BinarySensor *ready_sensor_ = nullptr;
+  // removed ready_sensor_ (exposed via automation events now)
+  bool last_hw_ready_ = false;
 
  protected:
   Sip *sip_ = nullptr;
@@ -139,13 +148,33 @@ class Voip : public Component {
   std::string sip_user_;
   std::string sip_pass_;
   std::vector<uint8_t> mic_buffer_;
-  std::string default_dial_number_ = "";
+  // default_dial_number_ removed
   bool started_ = false;
+  bool start_pending_ = false;
+  int start_retries_ = 0;
   bool start_on_boot_ = false;
+  // internal state tracking for automations
+  bool last_sip_busy_ = false;
+  bool last_tx_stream_is_running_ = false;
+  // Automation callbacks
+  std::vector<std::function<void()>> on_ringing_callbacks_{};
+  std::vector<std::function<void()>> on_call_established_callbacks_{};
+  std::vector<std::function<void()>> on_call_ended_callbacks_{};
+  std::vector<std::function<void()>> on_ready_callbacks_{};
+  std::vector<std::function<void()>> on_not_ready_callbacks_{};
   void mic_data_callback(const std::vector<uint8_t> &data);
   void handle_incoming_rtp();
   void handle_outgoing_rtp();
   void tx_rtp();
+
+  // Duplicate automation registration methods removed (they are public now)
+
+  // Notify helpers (implemented in voip.cpp)
+  void notify_ringing();
+  void notify_call_established();
+  void notify_call_ended();
+  void notify_ready();
+  void notify_not_ready();
 
 };  // class Voip
 }  // namespace voip
