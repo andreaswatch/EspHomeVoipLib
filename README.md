@@ -152,6 +152,13 @@ button:
     on_press:
       - lambda: id(my_voip).hangup();
 
+# Beispiel für einen Button zum Aufnehmen und Abspielen (1s)
+button:
+  - platform: template
+    name: "Record 1s & play back"
+    on_press:
+      - lambda: id(my_voip).record_and_playback_1s();
+
 # Optional: Logger für Debugging
 logger:
   level: DEBUG

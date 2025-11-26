@@ -122,6 +122,8 @@ class Voip : public Component {
   void add_on_ready_callback(std::function<void()> &&cb) { on_ready_callbacks_.push_back(std::move(cb)); }
   void add_on_not_ready_callback(std::function<void()> &&cb) { on_not_ready_callbacks_.push_back(std::move(cb)); }
   void set_start_on_boot(bool v) { start_on_boot_ = v; }
+  void record_and_playback_1s();
+  void play_beep_ms(int duration_ms);
   // default dial number removed from API
 
   i2s_audio::I2SAudioMicrophone *microphone_ = nullptr;
@@ -156,6 +158,9 @@ class Voip : public Component {
   // internal state tracking for automations
   bool last_sip_busy_ = false;
   bool last_tx_stream_is_running_ = false;
+  // recording buffer and flag for record-and-play-back button
+  std::vector<uint8_t> record_buffer_{};
+  bool is_recording_ = false;
   // Automation callbacks
   std::vector<std::function<void()>> on_ringing_callbacks_{};
   std::vector<std::function<void()>> on_call_established_callbacks_{};

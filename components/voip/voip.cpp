@@ -1,10 +1,13 @@
 #include "voip.h"
 #include <cstring>
 #include <cstdarg>
+#include <cmath>
+#include <functional>
 #include "esphome/core/helpers.h"
 #include "esphome/core/hal.h"
 #include <esp_system.h>
 #include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include "mbedtls/md5.h"
 #include "mbedtls/md.h"
 #include <netinet/in.h>
@@ -985,6 +988,7 @@ void Voip::finish_start_component() {
   } else {
     ESP_LOGW(TAG, "VoIP finish_start_component: microphone_ is null, continuing without mic callbacks");
   }
+  ESP_LOGD(TAG, "VoIP finish_start_component: mic=%p, speaker=%p, sample_rate=%d, bits=%d", microphone_, speaker_, SAMPLE_RATE, SAMPLE_BITS);
   started_ = true;
   start_retries_ = 0;
   ESP_LOGI(TAG, "Voip finish_start_component: started_ set to true");
@@ -999,8 +1003,13 @@ void Voip::finish_start_component() {
 void Voip::stop_component() {
   if (!started_) return;
   ESP_LOGI(TAG, "Stopping VoIP component...");
+  // Cancel any scheduled timeouts related to recording/playback to avoid callbacks
+  App.scheduler.cancel_timeout(this, "voip_record_warmup");
+  App.scheduler.cancel_timeout(this, "voip_record_stop");
+  App.scheduler.cancel_timeout(this, "voip_playback_wait");
   if (microphone_) {
     microphone_->stop();
+    ESP_LOGI(TAG, "VoIP stop_component: microphone stop invoked, is_stopped=%d", microphone_->is_stopped());
   }
   if (this->rtp_udp_) {
     // no explicit close on socket::Socket in this component; releasing unique_ptr would close
@@ -1085,6 +1094,7 @@ void Voip::handle_incoming_rtp() {
       for (int i = 0; i < rtppkg_size_; i++) {
         buffer[i] = ulaw2linear(payload[i]) * amp_gain_;
       }
+      ESP_LOGD(TAG, "handle_incoming_rtp: speaker->play called for incoming RTP (PCMU), bytes=%u", (unsigned)(sizeof(int16_t) * rtppkg_size_));
       speaker_->play((const uint8_t *)buffer, sizeof(int16_t) * rtppkg_size_);
     }
   } else if (codec_type_ == 1) {
@@ -1115,6 +1125,7 @@ void Voip::handle_incoming_rtp() {
       for (int i = 0; i < rtppkg_size_; i++) {
         buffer[i] = alaw2linear(payload[i]) * amp_gain_;
       }
+      ESP_LOGD(TAG, "handle_incoming_rtp: speaker->play called for incoming RTP (PCMA), bytes=%u", (unsigned)(sizeof(int16_t) * rtppkg_size_));
       speaker_->play((const uint8_t *)buffer, sizeof(int16_t) * rtppkg_size_);
     }
   }
@@ -1124,7 +1135,13 @@ void Voip::handle_outgoing_rtp() {
   if (sip_ && !sip_->audioport.empty() && !tx_stream_is_running_) {
     tx_stream_is_running_ = true;
     ESP_LOGI(TAG, "Starting RTP stream");
-    if (microphone_) microphone_->start();
+    if (microphone_) {
+      ESP_LOGD(TAG, "handle_outgoing_rtp: attempting to start microphone, is_stopped=%d", microphone_->is_stopped());
+      if (microphone_->is_stopped()) {
+        microphone_->start();
+        ESP_LOGI(TAG, "handle_outgoing_rtp: microphone started for RTP TX");
+      }
+    }
     App.scheduler.set_interval(this, "rtp_tx", 20, [this]() { tx_rtp(); });
   } else if ((sip_ && sip_->audioport.empty()) && tx_stream_is_running_) {
     tx_stream_is_running_ = false;
@@ -1134,6 +1151,36 @@ void Voip::handle_outgoing_rtp() {
     if (microphone_) microphone_->stop();
     App.scheduler.cancel_interval(this, "rtp_tx");
   }
+}
+
+// Play a simple beep tone through speaker for a specified duration (ms)
+void Voip::play_beep_ms(int duration_ms) {
+  if (!this->speaker_) {
+    ESP_LOGW(TAG, "play_beep_ms: speaker_ is null, cannot play beep");
+    return;
+  }
+  if (duration_ms <= 0) {
+    ESP_LOGW(TAG, "play_beep_ms: duration_ms <= 0 (%d), ignoring", duration_ms);
+    return;
+  }
+  ESP_LOGI(TAG, "play_beep_ms: playing beep for %d ms", duration_ms);
+  // Generate a 1kHz sine wave at SAMPLE_RATE with int16 samples
+  const int sample_rate = SAMPLE_RATE; // 8000
+  const int freq = 1000; // 1kHz beep
+  int samples = (duration_ms * sample_rate) / 1000;
+  if (samples <= 0) samples = 1;
+  std::vector<int16_t> buf(samples);
+  static constexpr float PI = 3.14159265358979323846f;
+  for (int i = 0; i < samples; ++i) {
+    float t = (float)i / (float)sample_rate;
+    float val = std::sin(2.0f * PI * (float)freq * t);
+    // scale amplitude to reasonable level and apply amp_gain_
+    int16_t s = (int16_t)(val * (INT16_MAX / 4) * (amp_gain_ / (float)AMP_GAIN_DEFAULT));
+    buf[i] = s;
+  }
+  // Play raw int16 samples
+  this->speaker_->play((const uint8_t *)buf.data(), samples * sizeof(int16_t));
+  ESP_LOGD(TAG, "play_beep_ms: done scheduling play, samples=%d", samples);
 }
 
 void Voip::tx_rtp() {
@@ -1279,6 +1326,85 @@ void Voip::tx_rtp() {
 
 void Voip::mic_data_callback(const std::vector<uint8_t> &data) {
   mic_buffer_.insert(mic_buffer_.end(), data.begin(), data.end());
+  ESP_LOGD(TAG, "mic_data_callback: received %u bytes, mic_buffer=%u bytes", (unsigned)data.size(), (unsigned)mic_buffer_.size());
+  if (this->is_recording_) {
+    this->record_buffer_.insert(this->record_buffer_.end(), data.begin(), data.end());
+    ESP_LOGD(TAG, "mic_data_callback: appended to record_buffer, now %u bytes", (unsigned)this->record_buffer_.size());
+  }
+}
+
+// Record 1s of audio via microphone, then playback via speaker
+void Voip::record_and_playback_1s() {
+  if (!microphone_ || !speaker_) {
+    ESP_LOGW(TAG, "record_and_playback_1s: microphone or speaker not configured");
+    return;
+  }
+  if (is_recording_) {
+    ESP_LOGW(TAG, "record_and_playback_1s: already recording");
+    return;
+  }
+  ESP_LOGI(TAG, "record_and_playback_1s: starting 1s recording");
+  // Clear previous buffer and mark recording
+  record_buffer_.clear();
+  is_recording_ = true;
+  // existing mic_data_callback will append to record_buffer_ while is_recording_ is true
+  // Start mic and schedule stop after 1000ms
+  // Only start microphone if it's currently stopped; if already running, leave it as-is
+  if (this->microphone_->is_stopped()) {
+    ESP_LOGD(TAG, "record_and_playback_1s: microphone is_stopped()=true, starting mic");
+    microphone_->start();
+    ESP_LOGI(TAG, "record_and_playback_1s: microphone started");
+  } else {
+    ESP_LOGD(TAG, "record_and_playback_1s: microphone is_stopped()=false, not starting");
+  }
+  // Warm up the microphone for a short duration to reduce driver read timeouts; then record for 1s
+  // Schedule the stop after desired record length (1s)
+  App.scheduler.set_timeout(this, "voip_record_stop", 1000, [this]() {
+    ESP_LOGI(TAG, "record_and_playback_1s: stopping recording, len=%u", (unsigned)this->record_buffer_.size());
+    // Stop microphone
+    microphone_->stop();
+    ESP_LOGI(TAG, "record_and_playback_1s: microphone stop invoked, is_stopped=%d", this->microphone_->is_stopped());
+    this->is_recording_ = false;
+    // Playback using speaker if buffer has data
+    if (!this->record_buffer_.empty()) {
+      ESP_LOGI(TAG, "record_and_playback_1s: waiting for microphone to stop before playback, len=%u",
+           (unsigned)this->record_buffer_.size());
+      // The microphone stop is asynchronous: the driver may still hold the I2S bus
+      // (see i2s_audio.microphone loop/stop logic). We poll microphone->is_stopped() until the
+      // driver is fully unloaded, then start playback. If the mic doesn't stop within the
+      // timeout, we fall back to starting playback to avoid blocking forever.
+      const int max_retries = 10;         // up to ~1 second (max_retries * retry_interval_ms)
+      const int retry_interval_ms = 100;  // ms
+      auto retries = std::make_shared<int>(0);
+          auto cb = std::make_shared<std::function<void()>>();
+          *cb = [this, retries, max_retries, retry_interval_ms, cb]() mutable {
+        ESP_LOGD(TAG, "record_and_playback_1s: playback wait callback, retries=%d", *retries);
+        if (this->microphone_ == nullptr) {
+          ESP_LOGW(TAG, "record_and_playback_1s: microphone vanished, attempting playback");
+          this->speaker_->play(this->record_buffer_.data(), this->record_buffer_.size());
+          // shared_ptr will free automatically when no longer referenced
+          return;
+        }
+        if (this->microphone_->is_stopped()) {
+          ESP_LOGI(TAG, "record_and_playback_1s: microphone stopped, starting playback");
+          ESP_LOGD(TAG, "record_and_playback_1s: speaker play called with %u bytes", (unsigned)this->record_buffer_.size());
+          this->speaker_->play(this->record_buffer_.data(), this->record_buffer_.size());
+          return;
+        }
+        if ((*retries) >= max_retries) {
+          ESP_LOGW(TAG, "record_and_playback_1s: microphone didn't stop after %d ms, starting playback anyway",
+                   max_retries * retry_interval_ms);
+          this->speaker_->play(this->record_buffer_.data(), this->record_buffer_.size());
+          return;
+        }
+        (*retries)++;
+        App.scheduler.set_timeout(this, "voip_playback_wait", retry_interval_ms, *cb);
+      };
+      App.scheduler.set_timeout(this, "voip_playback_wait", retry_interval_ms, *cb);
+    } else {
+      ESP_LOGW(TAG, "record_and_playback_1s: no audio recorded to playback");
+    }
+  });
 }
 
 }  // namespace voip

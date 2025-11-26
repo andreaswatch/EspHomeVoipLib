@@ -67,6 +67,21 @@ button:
     on_press:
       - lambda: id(my_voip).hangup();
 
+  - platform: template
+    name: "Record 1s & play back"
+    on_press:
+      - lambda: |-
+          id(my_voip).record_and_playback_1s();
+
+  - platform: template
+    name: "Beep 200ms"
+    on_press:
+      - switch.turn_on: pa_power
+      - lambda: |-
+          if (id(my_voip) != nullptr) id(my_voip).play_beep_ms(200);
+      - delay: 300ms
+      - switch.turn_off: pa_power
+
 
 
 

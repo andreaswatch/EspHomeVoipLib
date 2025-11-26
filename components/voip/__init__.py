@@ -77,4 +77,5 @@ async def to_code(config):
     for conf in config.get('on_not_ready', []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
         await automation.build_automation(trigger, [], conf)
+    # Expose beep helper via lambda (no codegen needed) - users can call id(my_voip).play_beep_ms(200)
     await cg.register_component(var, config)
