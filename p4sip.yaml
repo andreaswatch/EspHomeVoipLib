@@ -77,9 +77,20 @@ button:
     name: "Beep 200ms"
     on_press:
       - switch.turn_on: pa_power
+      - delay: 50ms
       - lambda: |-
-          if (id(my_voip) != nullptr) id(my_voip).play_beep_ms(200);
-      - delay: 300ms
+          if (id(my_voip) != nullptr) id(my_voip).play_beep_ms(200, 4.0);
+      - delay: 700ms
+      - switch.turn_off: pa_power
+
+  - platform: template
+    name: "Beep 1s"
+    on_press:
+      - switch.turn_on: pa_power
+      - delay: 100ms
+      - lambda: |-
+          if (id(my_voip) != nullptr) id(my_voip).play_beep_ms(1000, 2.0);
+      - delay: 1200ms
       - switch.turn_off: pa_power
 
 
@@ -107,7 +118,7 @@ switch:
     name: "PA Power"
     id: pa_power
     output: pa_ctrl
-    restore_mode: ALWAYS_OFF
+    restore_mode: ALWAYS_ON
 
 
 # I2S Audio

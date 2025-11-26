@@ -1154,7 +1154,7 @@ void Voip::handle_outgoing_rtp() {
 }
 
 // Play a simple beep tone through speaker for a specified duration (ms)
-void Voip::play_beep_ms(int duration_ms) {
+void Voip::play_beep_ms(int duration_ms, float volume_scale) {
   if (!this->speaker_) {
     ESP_LOGW(TAG, "play_beep_ms: speaker_ is null, cannot play beep");
     return;
@@ -1163,7 +1163,7 @@ void Voip::play_beep_ms(int duration_ms) {
     ESP_LOGW(TAG, "play_beep_ms: duration_ms <= 0 (%d), ignoring", duration_ms);
     return;
   }
-  ESP_LOGI(TAG, "play_beep_ms: playing beep for %d ms", duration_ms);
+  ESP_LOGI(TAG, "play_beep_ms: playing beep for %d ms, volume_scale=%f", duration_ms, volume_scale);
   // Generate a 1kHz sine wave at SAMPLE_RATE with int16 samples
   const int sample_rate = SAMPLE_RATE; // 8000
   const int freq = 1000; // 1kHz beep
@@ -1175,12 +1175,18 @@ void Voip::play_beep_ms(int duration_ms) {
     float t = (float)i / (float)sample_rate;
     float val = std::sin(2.0f * PI * (float)freq * t);
     // scale amplitude to reasonable level and apply amp_gain_
-    int16_t s = (int16_t)(val * (INT16_MAX / 4) * (amp_gain_ / (float)AMP_GAIN_DEFAULT));
+    float amp = (INT16_MAX / 2.0f) * (amp_gain_ / (float)AMP_GAIN_DEFAULT) * volume_scale;
+    int16_t s = (int16_t)(val * amp);
     buf[i] = s;
   }
+  // Dump first few samples for debugging
+  for (int i = 0; i < std::min(samples, 8); ++i) {
+    ESP_LOGD(TAG, "play_beep_ms: sample[%d]=%d", i, buf[i]);
+  }
   // Play raw int16 samples
+  ESP_LOGD(TAG, "play_beep_ms: calling speaker->play with %u bytes", (unsigned)(samples * sizeof(int16_t)));
   this->speaker_->play((const uint8_t *)buf.data(), samples * sizeof(int16_t));
-  ESP_LOGD(TAG, "play_beep_ms: done scheduling play, samples=%d", samples);
+  ESP_LOGD(TAG, "play_beep_ms: returned from speaker->play, samples=%d", samples);
 }
 
 void Voip::tx_rtp() {
