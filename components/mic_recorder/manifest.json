@@ -1,0 +1,8 @@
+{
+  "name": "mic_recorder",
+  "version": "0.1.0",
+  "documentation": "Record microphone input and expose a web endpoint to download the last recording",
+  "dependencies": [],
+  "codeowners": ["@andreaswatch"],
+  "requirements": []
+}

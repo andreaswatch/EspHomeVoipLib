@@ -1,3 +1,38 @@
+### Microphone recorder
+The repository ships a small helper component `mic_recorder` which allows recording the I2S microphone independently from the VoIP component and exposes a small web API.
+
+Example configuration (already included in `p4sip.yaml`):
+```yaml
+  mic_recorder:
+    id: mic_recorder
+    mic_id: board_microphone
+```
+
+Endpoints provided (once the web server is enabled):
+- `/micrec/start?ms=1000` — start a recording for `ms` milliseconds, returns JSON status.
+- `/micrec/stop` — stop recording immediately.
+- `/micrec/latest` — download the last recorded audio as a WAV file (`audio/wav`).
+- `/micrec/stream` — same as `/micrec/latest` for now (future enhancements could add live streaming).
+
+You can add a button in YAML (already in `p4sip.yaml`) that triggers a 1s recording:
+```yaml
+  - platform: template
+    name: "Mic Download 1s"
+    on_press:
+      - lambda: |-
+          if (id(mic_recorder) != nullptr) id(mic_recorder).record_for_ms(1000);
+```
+
+This stores the recorded data in memory and exposes it as a WAV file via `/micrec/latest`. For longer recordings or to persist recordings across reboots, extend the component to save to SPIFFS/LittleFS.
+
+Quick test via curl:
+
+```bash
+curl 'http://<device-ip>/micrec/start?ms=1000'
+sleep 1.2
+curl 'http://<device-ip>/micrec/latest' -o mic.wav
+aplay -f cd mic.wav   # or play the mic.wav in your OS
+```
 # ESPHome VoIP Library
 
 Diese Bibliothek bietet SIP- und VoIP-Komponenten für ESPHome, um VoIP-Funktionalität auf ESP32/ESP8266-Geräten zu ermöglichen.

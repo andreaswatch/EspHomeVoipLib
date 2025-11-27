@@ -1,0 +1,4 @@
+MD5 (bootloader.bin) = 80c887fa85da9f18eb484626afc44731
+MD5 (network_adapter.bin) = dea4ab74839ed7994c80c5920ffa538e
+MD5 (ota_data_initial.bin) = 84d04c9d6cc8ef35bf825d51a5277699
+MD5 (partition-table.bin) = 9f94bf1e89f37d80f4310d5af19a6e59
